@@ -1,0 +1,73 @@
+---
+title: Building APIs with ASP.NET Core
+description: A beginner-friendly introduction to web APIs, .NET, and the practical approach used throughout this course.
+---
+
+Welcome! This course introduces the ideas and tools behind building web APIs with .NET and ASP.NET Core. It aims to make each step understandable: what the code does, how a request moves through an application, and why a particular approach might be useful.
+
+If you are new to programming, take your time. You do not need to understand every new word on the first pass. Try the examples, change one thing at a time, and use the explanations to build a mental model of how the pieces fit together.
+
+## Start with a few essential terms
+
+These terms are related, but they do not mean the same thing:
+
+- **C#** is a programming language. You write instructions in C# to describe what your application should do.
+- **.NET** is a development platform. It includes the runtime that executes applications, libraries that provide reusable functionality, and tools for building and testing software.
+- **.NET SDK** is the set of tools used to create, build, and publish .NET applications. It includes the `dotnet` command-line interface.
+- **ASP.NET Core** is a framework built on .NET for handling web requests and building websites and APIs.
+- **API** stands for Application Programming Interface. A web API is a defined way for another program to request data or actions from your application.
+- **Client** and **server** describe roles in a conversation. A browser, mobile app, or API-testing tool can be the client; a web API is usually the server.
+- **HTTP** is the protocol clients and servers use to exchange web requests and responses. The next guides explore HTTP in more detail.
+
+For example, a mobile app can ask a web API for a list of products. The API receives the request, gets or updates data as needed, and sends a response—often as JSON. The app then uses that response to show information to a person.
+
+## What this course covers
+
+The focus is building web APIs with C# and ASP.NET Core. As you work through the material, you will learn how to:
+
+- Create and run an ASP.NET Core application.
+- Receive HTTP requests and return useful responses.
+- Organize API code so it is easier to understand and change.
+- Use common .NET tools and libraries.
+- Test behavior and investigate problems.
+- Read framework documentation and, when useful, explore how framework code works.
+
+The examples aim to connect concepts to working code. Instead of treating a framework feature as magic, we will look at what it does and how it affects the request being handled.
+
+## Is this course right for you?
+
+The material is intended for people who want to learn how real web APIs are built, whether for work, study, or personal projects. Programming concepts are introduced in context, but building an API also involves learning C# and becoming comfortable with basic programming ideas such as variables, methods, conditions, and types.
+
+If these ideas are new, that is okay: pause when necessary, look up unfamiliar terms, and practice small examples before moving on. You may find it helpful to study C# fundamentals alongside the API material.
+
+You will also use a terminal to create, build, and run projects. If the terminal is unfamiliar, the [Tooling Overview](/docs/tooling-overview) explains the commands used in the course.
+
+## Why use ASP.NET Core?
+
+ASP.NET Core is a modern, open-source web framework that runs on .NET. It supports multiple operating systems, provides a large set of built-in features, and can be used for APIs as well as other kinds of web applications.
+
+Those benefits do not mean every application should use the same architecture or framework. A good choice depends on the problem, the team's experience, operational needs, and the tools an organization already uses. This course focuses on ASP.NET Core because it is a capable platform for learning how web APIs work and for building production applications.
+
+## A practical way to learn
+
+Software development involves making decisions with incomplete information. There is rarely one approach that is best for every application. The goal here is to explain trade-offs, show patterns that work well in common situations, and help you understand when a different choice may be appropriate.
+
+<Callout type="idea" title="Learn by changing the examples">
+  Run an example first, then make one small change and observe the result. For
+  example, change a route, a returned value, or a status code. Small experiments
+  help connect the code you read to the behavior you see.
+</Callout>
+
+<Callout type="warning" title="Do not memorize without understanding">
+  A command or code pattern is more useful when you know what problem it solves.
+  When something is unfamiliar, ask: what information comes in, what work
+  happens, and what result goes out?
+</Callout>
+
+## Suggested reading path
+
+1. Read the [Tooling Overview](/docs/tooling-overview) and verify that the .NET SDK is installed.
+2. Continue to [HTTP Overview and the Bridge to ASP.NET Core](/docs/http-overview) to see how requests, responses, and ASP.NET Core fit together.
+3. As you move into later topics, keep a small project where you can try each new idea.
+
+The most important recommendation is to keep building and testing small pieces. A working experiment—even one that you later replace—is often the fastest way to understand a new concept.

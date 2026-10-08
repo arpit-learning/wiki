@@ -1,0 +1,296 @@
+---
+title: HTTP Overview and the Bridge to ASP.NET Core
+description: Learn how HTTP requests and responses work, then trace one through an ASP.NET Core application.
+---
+
+An API is a program that other software can communicate with. To understand what ASP.NET Core does, first understand the conversation it handles: a client sends an HTTP request, the server processes it, and the server sends back an HTTP response.
+
+This page builds that idea in stages, then follows a request into a small ASP.NET Core application.
+
+## What is HTTP?
+
+HTTP stands for **Hypertext Transfer Protocol**. A protocol is an agreed set of rules for exchanging information. HTTP defines how a client asks for a resource or submits data, and how a server responds.
+
+The **client** is the program that starts the conversation. It could be a browser, a mobile app, a command-line tool, or Postman. The **server** receives the request, decides what to do, and returns a response. An API is usually the server side of this conversation.
+
+The examples below use HTTP/1.1's readable text format. HTTP/2 and HTTP/3 use different formats on the network, but the same basic concepts—methods, headers, status codes, and bodies—still apply.
+
+## Read a URL
+
+Before reading a request, it helps to recognize the parts of a URL:
+
+```text
+https://api.example.com/products/42?include=reviews
+```
+
+| Part | Example | Purpose |
+| --- | --- | --- |
+| Scheme | `https` | Says which protocol to use. HTTPS protects the connection with TLS. |
+| Host | `api.example.com` | Identifies the server the client wants to reach. |
+| Path | `/products/42` | Identifies the resource or route being requested. |
+| Query string | `?include=reviews` | Supplies optional parameters that modify or filter the request. |
+
+The query string begins with `?`; multiple values are commonly separated with `&`, as in `?category=books&page=2`. A URL fragment beginning with `#` is generally handled by the client and is not sent as part of an HTTP request.
+
+## A request and a response
+
+A client might request an HTML page like this:
+
+```http
+GET /index.html HTTP/1.1
+Host: www.example.com
+Accept: text/html
+Accept-Language: en-US
+```
+
+The first line is the **request line**. It contains:
+
+- `GET`: the method, or the kind of action the client is requesting.
+- `/index.html`: the path to the resource.
+- `HTTP/1.1`: the protocol version used for this example.
+
+The lines below it are **headers**: named pieces of information about the request. `Host` identifies the server, `Accept` says which response formats the client can handle, and `Accept-Language` communicates a preferred language.
+
+After the headers comes a blank line. A request may then include a **body** containing data, depending on the method and its intended semantics. This `GET` asks for a page and has no body.
+
+The server might reply:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+
+<!doctype html>
+<html lang="en">
+  <body>
+    <h1>Example page</h1>
+  </body>
+</html>
+```
+
+The response contains:
+
+1. A **status line**: `HTTP/1.1` is the version, `200` is the status code, and `OK` is a short reason phrase.
+2. **Headers**: `Content-Type` says the body contains HTML encoded as UTF-8.
+3. A blank line, which separates headers from the body.
+4. A **body**: the returned content. Some responses, such as a response with status `204 No Content`, do not have a body.
+
+The request and response do not have to contain HTML. APIs commonly exchange JSON, a text format for structured data:
+
+```json
+{
+  "id": 42,
+  "name": "Example product"
+}
+```
+
+## Headers: `Accept` and `Content-Type`
+
+Headers are metadata: information that helps the client and server interpret a request or response.
+
+Two headers are especially useful when working with APIs:
+
+- **`Accept`** describes the response format the client would prefer. For example, `Accept: application/json` asks for JSON.
+- **`Content-Type`** describes the format of data included in a request or response body. For example, `Content-Type: application/json` says that the body is JSON.
+
+These headers answer different questions: `Accept` is about what the client wants back; `Content-Type` is about what the sender put in the body.
+
+## HTTP methods
+
+An HTTP method describes the action a client wants to perform. Methods are sometimes called *verbs*.
+
+| Method | Typical purpose | Example |
+| --- | --- | --- |
+| `GET` | Retrieve a resource without asking to change it. | Get product `42`. |
+| `POST` | Submit data for processing, often creating a resource or triggering an operation. | Create a new product. |
+| `PUT` | Create or replace the state of a resource at a known URI. | Replace product `42`. |
+| `PATCH` | Apply a partial change to a resource. | Change only product `42`'s name. |
+| `DELETE` | Request that a resource be removed. | Delete product `42`. |
+| `HEAD` | Get the headers that a `GET` request would return, without a response body. | Check whether a file exists before downloading it. |
+| `OPTIONS` | Ask which communication options are available for a resource. | Discover methods supported by an endpoint. |
+
+Many APIs use `GET`, `POST`, `PUT`, and `DELETE`; `PATCH` is also common. The method is part of the API's contract: a `GET` should retrieve information, while a `POST` may cause a change.
+
+<Callout type="info" title="Can a GET request have a body?">
+  HTTP does not define generally useful semantics for content in a `GET`
+  request. Some clients, servers, or intermediaries may reject it. For typical
+  APIs, put retrieval filters in the path or query string, and use a method such
+  as `POST` when submitting a request body.
+</Callout>
+
+### Safe and idempotent methods
+
+Two terms help explain why the method matters:
+
+- A **safe** method is intended to retrieve information without changing the resource. `GET` is safe.
+- An **idempotent** method has the same intended effect if the same request is repeated. `GET`, `PUT`, and `DELETE` are idempotent by definition, even if repeated responses differ. `POST` is not generally idempotent.
+
+For example, sending the same `PUT` to set a product's name to `"Notebook"` twice should leave the product in the same state as sending it once. Repeating a `POST` that places an order could create two orders. This is one reason clients should not blindly retry requests that may cause side effects.
+
+## HTTP status codes
+
+A status code is a three-digit number that summarizes the result of a request. The first digit identifies its class:
+
+| Class | Meaning |
+| --- | --- |
+| `1xx` | Informational: the request was received and processing continues. |
+| `2xx` | Success: the request was received and handled successfully. |
+| `3xx` | Redirection: the client needs to take further action. |
+| `4xx` | Client error: something about the request prevents it from being fulfilled. |
+| `5xx` | Server error: the server failed while handling a request that appeared valid. |
+
+Common codes in API work include:
+
+| Code | Meaning and typical use |
+| --- | --- |
+| `200 OK` | The request succeeded and the response usually contains a result. |
+| `201 Created` | The request succeeded and created a resource. The response may include a `Location` header pointing to it. |
+| `204 No Content` | The request succeeded and there is no response body to return. |
+| `400 Bad Request` | The request is malformed or contains invalid data. |
+| `401 Unauthorized` | The request lacks acceptable authentication credentials. A server commonly includes a `WWW-Authenticate` header. |
+| `403 Forbidden` | The server understood the request but refuses to allow it. |
+| `404 Not Found` | No resource matching the request was found. |
+| `500 Internal Server Error` | The server encountered an unexpected problem while processing the request. |
+
+<Callout type="idea" title="Choose the status that explains the outcome">
+  A successful HTTP exchange does not always mean the application operation
+  succeeded. Use a status code that describes the actual result: for example,
+  `201` for a created resource, `400` for invalid input, or `404` when a
+  requested resource is missing.
+</Callout>
+
+## Send data in a request body
+
+When a client needs to submit data, it can include a body. Here is a simplified request to create a product:
+
+```http
+POST /products HTTP/1.1
+Host: api.example.com
+Accept: application/json
+Content-Type: application/json
+
+{
+  "name": "Notebook",
+  "price": 4.50
+}
+```
+
+In this example:
+
+- `POST /products` asks the server to process a submission for the products resource.
+- `Accept: application/json` says the client would like a JSON response.
+- `Content-Type: application/json` says the submitted body is JSON.
+- The body contains the product data.
+
+The server still decides whether the data is valid and what operation to perform. HTTP carries the request; it does not define how the application stores or processes the product.
+
+## Why use HTTPS?
+
+HTTPS is HTTP protected by TLS. In practice, this helps protect data from being read or altered while it travels between the client and server, and lets the client verify the server's identity using a certificate.
+
+Use HTTPS for real applications, especially whenever requests contain credentials or personal information. During local development, ASP.NET Core can configure HTTPS for the development server; the exact certificate setup depends on the operating system.
+
+## How ASP.NET Core handles a request
+
+ASP.NET Core is a framework for building web apps and APIs on .NET. Its job is to accept HTTP requests, pass them through application code, and produce HTTP responses.
+
+You can create a starter API with the .NET SDK:
+
+```bash
+dotnet new webapi -n HelloApi
+cd HelloApi
+dotnet run
+```
+
+The generated template varies across SDK versions. The following simplified `Program.cs` demonstrates the request flow without tying the explanation to one template's extra OpenAPI setup:
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+// Register services and configuration before building the app.
+var app = builder.Build();
+
+app.UseHttpsRedirection();
+
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.Append("X-Request-Pipeline", "visited");
+    await next(context);
+});
+
+app.MapGet("/hello", () =>
+    Results.Ok(new { message = "Hello from ASP.NET Core" }));
+
+app.Run();
+```
+
+Read it from top to bottom:
+
+1. **Create the builder.** `WebApplication.CreateBuilder(args)` prepares configuration for the app, including default hosting and logging settings.
+2. **Register services.** Before `Build()`, an application can register services it will need. A service is an object that provides functionality to other parts of the app; examples include database access and application-specific logic.
+3. **Build the app.** `builder.Build()` creates the configured `WebApplication`.
+4. **Configure middleware.** `app.UseHttpsRedirection()` and `app.Use(...)` add request-processing behavior.
+5. **Map an endpoint.** `app.MapGet("/hello", ...)` associates a `GET` request for `/hello` with a handler. The handler returns a successful result containing JSON.
+6. **Start the server.** `app.Run()` starts the application. When it is running, the terminal reports the local address to use for testing.
+
+Send a `GET` request to the printed address followed by `/hello`. The request passes through the middleware, reaches the mapped endpoint, and receives a `200 OK` response with a JSON body similar to:
+
+```json
+{
+  "message": "Hello from ASP.NET Core"
+}
+```
+
+## Middleware: the request pipeline
+
+Middleware is code arranged in a pipeline. Each component can inspect or change the request, do work before or after the next component, and decide whether to pass control onward.
+
+In the example, the custom middleware adds a response header and then calls `await next(context)`. That call passes the request to the next component, allowing the endpoint to run.
+
+If middleware does **not** call `next`, it can end the pipeline itself. This is called *short-circuiting*:
+
+```csharp
+app.Use(async (context, next) =>
+{
+    context.Response.ContentType = "text/plain";
+    await context.Response.WriteAsync("This middleware handled the request.");
+    // No call to next(context): later components do not run.
+});
+```
+
+Use this behavior intentionally. If middleware short-circuits every request, endpoints later in the pipeline will not be reached. Middleware order also matters: a component only sees the request after earlier components have run, and its response work may happen before or after later components depending on where it calls `next`.
+
+## Endpoints are not middleware
+
+An **endpoint** is the application code selected to handle a particular request. For example, `MapGet("/hello", ...)` maps a route and HTTP method to a handler. It does not itself add a middleware component in the same way that `app.Use(...)` does.
+
+ASP.NET Core connects routing and endpoint execution with its request pipeline. The routing system matches the incoming method and path—`GET /hello`, for example—to the endpoint configured for them. The endpoint's return value is then turned into an HTTP response.
+
+## `HttpContext`: the current exchange
+
+ASP.NET Core provides an `HttpContext` for each request. Think of it as the object that brings together the details of the current client/server exchange.
+
+| Property | What it contains |
+| --- | --- |
+| `Request` | Incoming method, URL, headers, and body. |
+| `Response` | Outgoing status code, headers, and body. |
+| `User` | The identity and claims associated with the request, if available. |
+| `Items` | A key-value collection for sharing data during the current request. |
+| `Features` | Lower-level HTTP capabilities provided by the server. |
+
+For example, middleware can inspect `context.Request.Path`, and a handler can use `context.Response` to set response details. Many endpoint handlers can instead return a value, letting ASP.NET Core create the response.
+
+## OpenAPI and Swagger UI
+
+When building an API, developers often want documentation that describes its routes, parameters, and response types.
+
+- **OpenAPI** is a standard description format for HTTP APIs.
+- **Swagger UI** is a browser interface that can display an OpenAPI document and let a developer try operations.
+
+They are related, but not interchangeable: OpenAPI is the description; Swagger UI is one way to view and interact with it. ASP.NET Core templates and packages configure these features differently across versions. Postman is another client for sending requests, but it does not replace an API's OpenAPI description.
+
+## Further reading
+
+- [HTTP Semantics (RFC 9110)](https://www.rfc-editor.org/rfc/rfc9110.html)
+- [ASP.NET Core middleware](https://learn.microsoft.com/aspnet/core/fundamentals/middleware)
+- [ASP.NET Core Minimal APIs](https://learn.microsoft.com/aspnet/core/fundamentals/minimal-apis)
+- [Tooling Overview](/docs/tooling-overview)

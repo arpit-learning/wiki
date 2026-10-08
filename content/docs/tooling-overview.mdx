@@ -1,0 +1,196 @@
+---
+title: Tooling Overview
+description: Install the .NET SDK, prepare an editor, create and run a first project, and learn the CLI tools used throughout the course.
+---
+
+This guide walks through the tools used in the course and shows how to use them together. You do not need to install every optional tool before continuing: the essential requirement is the .NET SDK. An editor makes it easier to work with code, while tools such as Postman can help you explore an API.
+
+The **terminal** is an application where you type commands and see their output. It is called Terminal on macOS, and you can use Windows Terminal or PowerShell on Windows. On Linux, use your distribution's terminal app.
+
+## The tools at a glance
+
+- **.NET SDK:** Creates, builds, tests, and publishes .NET applications. It includes the `dotnet` command.
+- **Visual Studio Code:** An editor for opening and changing project files.
+- **C# Dev Kit:** An optional Visual Studio Code extension that adds C#-specific features.
+- **NuGet Gallery:** A website for finding .NET libraries (also called packages).
+- **Postman:** An optional app for sending HTTP requests to an API.
+- **OpenAPI and Swagger UI:** Technologies and tools for describing an API and exploring its available operations in a browser.
+
+## Install the .NET SDK
+
+The **SDK** (Software Development Kit) contains the tools needed to develop .NET applications. It is different from the **runtime**, which is the part needed to run an already-built application. Installing the SDK is the right choice when you are learning or building .NET software.
+
+1. Visit the [official .NET download page](https://dot.net).
+2. Choose the current SDK for your operating system and follow the installer instructions.
+3. Close and reopen your terminal so it picks up any installation or path changes.
+4. Check that the command is available:
+
+```bash
+dotnet --version
+```
+
+You should see an SDK version number. To see more details, including installed SDKs and runtimes, run:
+
+```bash
+dotnet --info
+```
+
+To list every installed SDK:
+
+```bash
+dotnet --list-sdks
+```
+
+<Callout type="info" title="SDK versions and projects">
+  A project may request a particular SDK version or target a particular .NET
+  runtime. If a course example does not match your installed version, check the
+  version used by the course and the project's configuration before changing
+  your installation.
+</Callout>
+
+### If the `dotnet` command is not found
+
+This usually means the SDK did not install successfully, or the terminal cannot find its installation directory.
+
+1. Restart the terminal (or open a new terminal window).
+2. Confirm that you installed the **SDK**, not just the runtime.
+3. Use the official installer instructions for your operating system to check the installation and `PATH`.
+4. If you are on macOS, confirm the actual location of the `dotnet` executable before changing links or permissions. Do not run a `sudo ln -s` command unless you have verified that the source file exists and understand which path your installer uses.
+
+`PATH` is the list of directories that a terminal searches when you type a command. A terminal can run `dotnet` only if the executable is installed in a directory on that list, or if you provide its full path.
+
+## Install an editor and C# support
+
+[Visual Studio Code](https://code.visualstudio.com/) is an editor: it opens files and helps you write code. It does not replace the .NET SDK; the SDK is what creates and runs the project.
+
+1. Download Visual Studio Code from the [official website](https://code.visualstudio.com/).
+2. Install and open it.
+3. Open the Extensions view using the square icon in the sidebar. The keyboard shortcut is `Ctrl+Shift+X` on Windows/Linux or `Cmd+Shift+X` on macOS.
+4. Search for **C# Dev Kit**, check that it is published by Microsoft, and install it.
+
+C# Dev Kit provides C#-specific editing support, such as IntelliSense (inline completions and suggestions), project navigation, and debugging integration. A debugger helps you pause a running program and inspect what it is doing. These features make development more comfortable, but the `dotnet` CLI can still build and run a project without the extension.
+
+<Callout type="warning" title="Review extension licensing">
+  C# Dev Kit has licensing terms that depend on how it is used. Review the
+  current
+  [extension license information](https://marketplace.visualstudio.com/items?itemName=ms-dotnettools.csdevkit)
+  before using it for commercial work.
+</Callout>
+
+## Create and run a first project
+
+The commands below create a small ASP.NET Core Web API project:
+
+```bash
+dotnet new webapi -n HelloApi
+cd HelloApi
+dotnet run
+```
+
+Here is what each command does:
+
+1. `dotnet new webapi -n HelloApi` asks the SDK to create a project from its Web API template. The `-n` option supplies the project name; the template normally creates a `HelloApi` directory.
+2. `cd HelloApi` changes the terminal's current directory to the new project. Commands such as `dotnet run` look for a project in the current directory.
+3. `dotnet run` builds the project if needed and starts it. The terminal prints the local address or addresses where it is listening.
+
+Keep the terminal open while the app is running. To stop it, press `Ctrl+C`. The exact files, sample endpoint, and local addresses depend on the SDK version and template options, so check the output and generated `Program.cs` rather than assuming every installation produces identical code.
+
+To work on the project in Visual Studio Code, open the `HelloApi` folder using **File → Open Folder**. Opening the project folder (rather than a single source file) helps the editor recognize the project and its files.
+
+## Use the .NET CLI
+
+The `dotnet` command-line interface (CLI) accepts a command followed by optional arguments. You will usually run project commands from the directory containing the `.csproj` file, or from a parent directory containing a solution file.
+
+### Find project templates
+
+Templates are starting points for common kinds of projects. To see the templates installed with your SDK, run:
+
+```bash
+dotnet new list
+```
+
+Some common short names are `console` (a command-line program), `classlib` (a reusable code library), `web` (a basic web app), `webapi` (a Web API), and `mvc` (an MVC web app). The list can change between SDK versions and installed workloads.
+
+Additional templates can be installed from a template package:
+
+```bash
+dotnet new install TEMPLATE_PACKAGE_ID
+```
+
+Replace `TEMPLATE_PACKAGE_ID` with the package identifier from the template's instructions.
+
+### Build, run, test, and publish
+
+| Command | What it does | When to use it |
+| --- | --- | --- |
+| `dotnet restore` | Downloads project dependencies. | Usually run automatically by build commands; run directly when diagnosing dependency restore problems. |
+| `dotnet build` | Compiles the project and reports compilation errors. | Check that the code builds without starting the application. |
+| `dotnet run` | Builds if needed, then starts the app. | Try the application locally while developing. |
+| `dotnet test` | Builds and runs the tests in the project or solution. | Check that automated tests pass. |
+| `dotnet publish -c Release` | Prepares the app and its dependencies for deployment using the Release configuration. | Create deployable output. |
+
+For example, from a project directory:
+
+```bash
+dotnet restore
+dotnet build
+dotnet test
+dotnet run
+```
+
+Run `dotnet publish -c Release` when you are preparing a release. Publishing is not the same as deploying: you still need a hosting environment where the published application can run.
+
+### Read common command output
+
+- **Build succeeded** means compilation completed. It does not prove that the app behaves correctly; tests and manual checks are still useful.
+- **Build failed** means the compiler found an issue. Read the first error and its file/line location; later errors may be consequences of that first one.
+- **Restore failed** usually means the project could not obtain one or more dependencies. Check the package name, network connection, and any configured package sources.
+- **Now listening on...** means the web server started and gives you the local address to open or send requests to.
+
+<Callout type="idea" title="A useful beginner workflow">
+  Make one small change, run `dotnet build`, then run the application with
+  `dotnet run` and observe what changed. When the project has tests, run
+  `dotnet test` as well. This separates compile-time problems from behavior you
+  can see while the app is running.
+</Callout>
+
+## Explore packages with NuGet
+
+[NuGet Gallery](https://www.nuget.org/packages) is a searchable catalog of .NET packages. A package is reusable code that another project can depend on—for example, a library that helps work with a particular data format.
+
+Before adding a package, check:
+
+- Whether the .NET platform or a package you already use provides the feature.
+- The package's supported frameworks, release history, documentation, and license.
+- Whether the package is maintained and appropriate for your application.
+- Which additional packages it brings in as dependencies.
+
+For beginners, a good recommendation is to add a package only when you understand the problem it solves. More dependencies mean more code to maintain and update.
+
+## Send requests with Postman
+
+[Postman](https://www.postman.com/downloads/) is an optional app for composing HTTP requests and viewing responses. It is helpful when testing an API because you can select a method, enter a URL, add headers or a body, and inspect the returned status and data.
+
+1. Download and install Postman for your operating system.
+2. Start your API with `dotnet run`.
+3. Copy the local address printed in the terminal.
+4. In Postman, choose a method such as `GET`, enter the address of an endpoint, and select **Send**.
+5. Inspect the status code, response headers, and response body.
+
+Do not assume that every new project has the same sample endpoint or documentation page. Check the generated routes and the local address printed by your app.
+
+### OpenAPI and Swagger UI
+
+**OpenAPI** is a standard format for describing an API's endpoints, inputs, and responses. **Swagger UI** is one tool that can display an OpenAPI description as interactive browser documentation. They are related but not the same thing: an OpenAPI document describes an API, while a user interface lets you browse and try it.
+
+An ASP.NET Core template may configure OpenAPI support, but the exact setup changes across SDK versions. Postman and Swagger UI are both ways to send requests; neither replaces understanding what request is being sent or what response comes back.
+
+## Other development environments
+
+Visual Studio Code is the editor used in this course, but it is not the only option:
+
+- **Visual Studio** is a full-featured IDE (Integrated Development Environment) with project, debugging, and testing tools. Its availability and features depend on the operating system and edition.
+- **JetBrains Rider** is a cross-platform .NET IDE.
+- **ReSharper** is an extension for Visual Studio that adds navigation, code inspection, and refactoring tools.
+
+An IDE combines an editor with additional development tools. You can use one if you prefer, but the examples in the course focus on the .NET CLI so that the project workflow remains visible and portable.
