@@ -1,0 +1,88 @@
+---
+title: Introduction to Entity Framework Core
+description: Learn how EF Core maps .NET objects to relational data and how contexts, entity sets, and providers fit together.
+---
+
+An API needs a place to store data. So far, the course has used an in-memory list: it is easy to understand, but the data disappears when the application stops. A relational database can store data more permanently, organize it into tables, and let multiple users or application instances work with it.
+
+**Entity Framework Core (EF Core)** is an object-relational mapper, usually shortened to **ORM**. It lets a .NET application work with database data through C# objects and LINQ queries. EF Core can translate supported queries into the language understood by a database, send them to that database, and turn returned rows into objects.
+
+## From tables to objects
+
+A relational database stores information in **tables**. A table has **columns** that describe fields and **rows** that hold individual records. For example, an `Employees` table could have `Id`, `FirstName`, and `LastName` columns. Each employee is one row.
+
+In EF Core, a C# type that is mapped to stored data is called an **entity**. The earlier in-memory example used an `Employee` record; for this walkthrough, replace it with a class whose properties can be changed as EF Core tracks updates. EF Core can map different C# shapes, but a mutable class is a common, straightforward starting point:
+
+```csharp
+public sealed class Employee
+{
+    public int Id { get; set; }
+    public string FirstName { get; set; } = string.Empty;
+    public string LastName { get; set; } = string.Empty;
+}
+```
+
+By convention, EF Core recognizes a property named `Id` as the primary key. A primary key uniquely identifies a row. Conventions are helpful defaults; you can configure different names or more complex relationships when a model requires them.
+
+An entity is not automatically a safe API response. A database entity can contain fields that clients should not see. API request and response models let the application choose exactly which data crosses the HTTP boundary.
+
+## The context and entity sets
+
+A **`DbContext`** represents a short-lived session for working with a database. It holds configuration, creates queries, tracks changes to entities, and saves those changes. A **`DbSet<TEntity>`** represents the entity type that the context can query or change; it is a starting point for a query, not a list that has already loaded every row.
+
+```csharp
+using System.Linq;
+using Microsoft.EntityFrameworkCore;
+
+public sealed class AppDbContext : DbContext
+{
+    public AppDbContext(DbContextOptions<AppDbContext> options)
+        : base(options)
+    {
+    }
+
+    public DbSet<Employee> Employees => Set<Employee>();
+}
+```
+
+`AppDbContext` is the application's context. `Employees` gives code a strongly typed way to query employee entities. EF Core can also use the context to track changes and persist them when the application calls `SaveChanges` or `SaveChangesAsync`.
+
+For example, an application can ask the database for employees whose last name matches a value:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+
+var employees = await dbContext.Employees
+    .Where(employee => employee.LastName == "Garcia")
+    .OrderBy(employee => employee.FirstName)
+    .ToListAsync();
+```
+
+The query uses familiar LINQ operations. With a database provider that supports the expressions in the query, EF Core translates them into a database query, executes it, and returns the results as a list. `ToListAsync` is the point where this example materializes the results; simply writing the `Where` and `OrderBy` expressions does not immediately fetch all matching rows. See [IEnumerable and IQueryable](/docs/ienumerable-and-iqueryable) for more detail about when queries execute.
+
+## Providers connect EF Core to databases
+
+A **database provider** is the component that connects EF Core to a particular database system. Providers translate queries and data operations into the form understood by their database. Common options include SQLite, SQL Server, PostgreSQL, and MySQL.
+
+Choose a provider based on the application and its environment. Providers do not all support exactly the same database features or translate every LINQ expression identically. The provider package and EF Core packages should be compatible with the project's target framework and with one another. This course uses SQLite for local learning because it is straightforward to run without setting up a separate database server; a production application may have different needs.
+
+<Callout type="warning" title="EF Core does not make every query portable">
+  EF Core gives you a common programming model, but each provider has its own
+  capabilities. Check the provider's documentation and test important queries
+  against the database you intend to use.
+</Callout>
+
+## What EF Core does—and does not—do
+
+EF Core can reduce repetitive data-access code, map relationships between entity types, track changes, and help evolve a schema through migrations. It does not remove the need to understand how data is stored, choose indexes, design API contracts, or check query performance. A short LINQ expression can still retrieve too many rows or cause expensive database work.
+
+The context also has a lifetime. It is designed for one unit of work, such as handling a web request: create or receive a context, query or change data, save when appropriate, then dispose of it. A context is not thread-safe, so do not share one context across simultaneous operations or keep it as a global object.
+
+EF Core's `DbContext` already provides query and unit-of-work behavior. A custom repository can still be useful when it creates a meaningful application boundary, but wrapping every context method in a one-to-one repository method often adds indirection without adding clarity. Keep the abstraction that helps the application; do not add one only because an ORM is present. See [The Repository Pattern](/docs/repository-pattern) for the earlier discussion of that trade-off.
+
+## Next
+
+- Learn why `IQueryable<T>` and `IEnumerable<T>` can perform work in different places in [IEnumerable and IQueryable](/docs/ienumerable-and-iqueryable).
+- Set up a provider, dependency injection, and schema changes in [Configuring a DbContext and Migrations](/docs/configuring-dbcontext-and-migrations).
+
+For a reference, see Microsoft's [EF Core overview](https://learn.microsoft.com/ef/core/).

@@ -1,0 +1,156 @@
+---
+title: Configuring a DbContext and Migrations
+description: Connect EF Core to a database, register a context with dependency injection, and evolve the schema carefully with migrations.
+---
+
+Before an API can query a database, the application needs to know which database provider to use, how to connect to it, and which entity types the context manages. EF Core's **migrations** then provide a reviewable way to change the database schema as the model evolves.
+
+This guide uses SQLite as a local learning database. The same overall steps apply to other providers, but package names, connection strings, supported features, and deployment procedures vary.
+
+## Install compatible packages and tools
+
+An EF Core **provider package** connects EF Core to a database. For this course's SQLite example, add the SQLite provider and the design-time package used by the EF command-line tools:
+
+```bash
+dotnet add package Microsoft.EntityFrameworkCore.Sqlite --version X.Y.Z
+dotnet add package Microsoft.EntityFrameworkCore.Design --version X.Y.Z
+```
+
+Replace `X.Y.Z` with the same compatible stable EF Core version for both packages. The provider brings in the EF Core runtime dependency it needs. Choose a version that supports the project's target framework, and keep the EF Core runtime, provider, design package, and `dotnet-ef` tool on compatible versions—normally the same EF Core major version. Check the provider's supported frameworks before updating an existing project.
+
+For repeatable team setup, create a **local tool manifest** once in the project and install a compatible version of the EF Core command-line tool:
+
+```bash
+dotnet new tool-manifest
+dotnet tool install dotnet-ef --version X.Y.Z
+```
+
+Replace `X.Y.Z` with the matching tool version. The manifest records the tool for the repository so teammates can restore it with `dotnet tool restore`; if the project already has a tool manifest, skip the creation command. A global installation is also possible, but the tool version still needs to match the project's EF Core packages.
+
+Run project commands from the directory containing the `.csproj` file, unless the command specifies a project path.
+
+## Create the context
+
+The context inherits from `DbContext`. Its options are supplied by the application so the context does not need to hard-code a provider or connection:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+
+public sealed class AppDbContext : DbContext
+{
+    public AppDbContext(DbContextOptions<AppDbContext> options)
+        : base(options)
+    {
+    }
+
+    public DbSet<Employee> Employees => Set<Employee>();
+}
+```
+
+`DbSet<Employee>` represents the employee entity set EF Core can query and update. EF Core can discover many aspects of the model by convention, including an `Id` primary key. As the model grows, configuration can also be added in `OnModelCreating` or in separate configuration classes.
+
+## Configure the provider and connection
+
+For a local SQLite database, an `appsettings.json` file can contain a connection string like this:
+
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Data Source=employees.db"
+  }
+}
+```
+
+This example names a local database file; its relative path depends on the application's working directory. Add any generated database file to `.gitignore` if it should remain local to the developer.
+
+Read the connection string from configuration and register the context before building the web application:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+
+var builder = WebApplication.CreateBuilder(args);
+
+var connectionString =
+    builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException(
+        "The DefaultConnection connection string is missing.");
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlite(connectionString));
+
+builder.Services.AddControllers();
+
+var app = builder.Build();
+app.MapControllers();
+app.Run();
+```
+
+`UseSqlite` comes from the SQLite provider package. For a different database, install that provider and use its corresponding configuration method. Do not mix provider setup snippets from different tutorials without checking which packages are installed.
+
+`AddDbContext` registers the context as a **scoped** service by default. In a web application, this typically gives each request its own context. Inject the context into a controller or other service that needs it; do not register it as a singleton or share one context between concurrent operations. A context is not thread-safe and should be disposed after its unit of work is complete.
+
+<Callout type="warning" title="Treat real credentials as secrets">
+  A local SQLite file path is not a password. If a connection string contains
+  database credentials or other secrets, do not commit those values to source
+  control. Use the configuration or secret-management mechanism appropriate
+  for your development and hosting environments.
+</Callout>
+
+## Create and apply a migration
+
+A **migration** records a proposed change from one version of the EF Core model to another. EF Core compares the current model with the saved model snapshot and generates operations such as creating a table, adding a column, or creating an index. The migration has an `Up` method for applying the change and a `Down` method for reversing it where possible.
+
+Create the initial migration:
+
+```bash
+dotnet ef migrations add InitialCreate
+```
+
+This adds migration code and a model snapshot to the project. Review the generated files before applying them. Check for unexpected table or column names, constraints, indexes, dropped data, or operations that could be destructive.
+
+For a local development database, apply the migrations:
+
+```bash
+dotnet ef database update
+```
+
+EF Core applies the migrations that have not yet been applied and records their identifiers in its migrations-history table. If the database does not exist, a provider such as SQLite can create it as part of the update. Create the migration **before** running this command; `database update` does not invent a schema change when there is no migration to apply.
+
+When the model changes, create a new migration and review it:
+
+```bash
+dotnet ef migrations add AddEmployeeEmail
+dotnet ef database update
+```
+
+The names are examples; choose a short name that describes the schema change. For a local learning database, applying the reviewed migration with `database update` is convenient. A production database needs a deliberate deployment and rollback plan; do not treat a local development command as a complete production release process.
+
+If you created a migration that has **not** been applied and decide it is wrong, the last migration can usually be removed with:
+
+```bash
+dotnet ef migrations remove
+```
+
+Do not remove or rewrite a migration that has already been applied to a shared or production database without coordinating a safe schema-change plan. A later corrective migration is often safer than changing history other environments may already depend on.
+
+## Review schema changes before deployment
+
+Migrations are code, not a guarantee that every database change is safe. Pay particular attention to generated operations that drop or rename columns, change nullability, alter keys, or transform existing data. EF Core may not be able to infer that a dropped column should instead be renamed, so inspect the migration and adjust it when necessary.
+
+For a production release:
+
+- Test the migration against a representative database and a backup or disposable copy.
+- Review data-preserving steps and the order in which changes are applied.
+- Coordinate application versions with schema changes so old and new app instances can coexist when required.
+- Choose a controlled deployment mechanism, such as a reviewed SQL script or an EF migration bundle, according to the team's release process.
+- Avoid applying migrations automatically every time the production application starts; deployment permissions, concurrent instances, and rollback need deliberate handling.
+
+The correct deployment process depends on the database and hosting environment. The important beginner habit is to inspect generated changes and test them before they affect data that matters.
+
+## Next
+
+- Learn how EF Core translates and executes LINQ in [IEnumerable and IQueryable](/docs/ienumerable-and-iqueryable).
+- Add predictable starter records in [Seeding Data with EF Core](/docs/seeding-data-with-ef-core).
+- Continue with [Querying Data with EF Core](/docs/querying-data-with-ef-core) once the context and schema are ready.
+
+For more information, see Microsoft's documentation on [DbContext configuration](https://learn.microsoft.com/ef/core/dbcontext-configuration/) and [migrations](https://learn.microsoft.com/ef/core/managing-schemas/migrations/).

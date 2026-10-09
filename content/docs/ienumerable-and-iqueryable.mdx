@@ -1,0 +1,123 @@
+---
+title: IEnumerable and IQueryable
+description: Understand how LINQ queries run in memory or are translated by a query provider, and choose when to materialize results.
+---
+
+`IEnumerable<T>` and `IQueryable<T>` both let C# code work with sequences of values. They can look similar in a LINQ expression, but they represent different ways of describing and processing a query. Knowing where the work happens helps prevent accidentally loading too much data into an API.
+
+## IEnumerable: a sequence you can enumerate
+
+`IEnumerable<T>` is an interface for a sequence that can be read one item at a time, such as by using `foreach`. LINQ operations from `Enumerable` can filter or transform an in-memory sequence:
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+IEnumerable<int> numbers = new[] { 1, 2, 3, 4, 5 };
+
+var evenNumbers = numbers.Where(number => number % 2 == 0);
+
+foreach (var number in evenNumbers)
+{
+    Console.WriteLine(number);
+}
+```
+
+`Where` usually uses **deferred execution**: it describes a filtering operation, and the filtering occurs as the sequence is enumerated. The example does not create a second list at the point where `Where` is called. It checks each number as the `foreach` loop asks for the next value.
+
+An `IEnumerable<T>` does not always mean “already in memory.” It could represent a generated or deferred sequence. What matters is which implementation supplies the sequence and which LINQ operators are being used.
+
+## IQueryable: a query description for a provider
+
+`IQueryable<T>` represents a query that a **query provider** can interpret. The provider may translate the query into SQL, call another service, or perform some other operation. EF Core's database sets, such as `dbContext.Employees`, implement `IQueryable<Employee>`.
+
+```csharp
+using System.Linq;
+using Microsoft.EntityFrameworkCore;
+
+IQueryable<Employee> query = dbContext.Employees
+    .Where(employee => employee.LastName == "Garcia")
+    .OrderBy(employee => employee.FirstName);
+
+var employees = await query.ToListAsync();
+```
+
+The `Where` and `OrderBy` calls build a query description. When `ToListAsync` is awaited, EF Core asks its provider to translate the supported parts of that description, runs the database query, and materializes the returned rows as a `List<Employee>`. This usually means filtering and ordering happen in the database rather than after every row has been copied into application memory.
+
+`IQueryable<T>` itself is not a database connection and does not guarantee that a database will be queried. It is an interface implemented by different providers. The behavior and available translations depend on the provider behind the query.
+
+## Expression trees and delegates
+
+The difference is partly about how a predicate is represented. A `Func<T, bool>` is executable code: it can be called for an item. An `Expression<Func<T, bool>>` is a structured description of code that another component can inspect.
+
+```csharp
+using System;
+using System.Linq.Expressions;
+
+Func<Employee, bool> inMemoryPredicate =
+    employee => employee.LastName == "Garcia";
+
+Expression<Func<Employee, bool>> queryPredicate =
+    employee => employee.LastName == "Garcia";
+```
+
+LINQ-to-Objects can call a delegate for each item. A query provider can inspect an expression tree and try to translate it. This is how EF Core can turn a supported expression such as `employee => employee.LastName == "Garcia"` into a database condition. A provider cannot translate every C# method or expression, so a query can fail if it contains an operation that the provider does not support.
+
+## Materialize when you mean to bring data into the application
+
+Methods such as `ToList`, `ToArray`, and their EF Core async counterparts create a concrete in-memory result. This is called **materialization**. Once the rows have been materialized, later LINQ operations on that list use in-memory LINQ:
+
+```csharp
+using System.Linq;
+using Microsoft.EntityFrameworkCore;
+
+var employees = await dbContext.Employees.ToListAsync();
+
+IEnumerable<Employee> localEmployees = employees;
+var matchingEmployees = localEmployees
+    .Where(employee => employee.LastName == "Garcia");
+```
+
+In this example, `ToListAsync` retrieves the employees first. The later `Where` runs in the application process, not in the database. That may be appropriate for a small, intentionally loaded collection, but it is usually wasteful to fetch every row and then filter it in memory.
+
+Prefer keeping filters, sorting, and projections on the `IQueryable<T>` until the query has narrowed the results to the data the application needs:
+
+```csharp
+using System.Linq;
+using Microsoft.EntityFrameworkCore;
+
+var employeeNames = await dbContext.Employees
+    .Where(employee => employee.LastName == "Garcia")
+    .OrderBy(employee => employee.LastName)
+    .Select(employee => employee.FirstName + " " + employee.LastName)
+    .ToListAsync();
+```
+
+This example requests only employees whose last name matches and returns their names. The provider can translate the supported operations and retrieve just the resulting values.
+
+## A practical comparison
+
+| | `IEnumerable<T>` | `IQueryable<T>` |
+| --- | --- | --- |
+| Main idea | A sequence that can be enumerated | A query description interpreted by a provider |
+| Typical LINQ implementation | LINQ-to-Objects (`Enumerable`) | Provider-backed LINQ (`Queryable`) |
+| Where work happens | In the process as the sequence is enumerated | Wherever the provider executes the query; often a database for EF Core |
+| Common materialization | `ToList()` or `ToArray()` | `ToListAsync()` or `ToArrayAsync()` with EF Core |
+| Important caution | Enumeration may still perform deferred work | Provider translation is limited to supported operations |
+
+Many LINQ operators are deferred for both interfaces. A terminal operation such as `ToList`, `First`, or `Count` typically causes evaluation; EF Core provides asynchronous terminal operations for database work. Enumerating the same `IQueryable<T>` again can execute another database query, so materialize once when you deliberately need to reuse a result. Do not materialize early just to make a query “easier” if that means downloading unnecessary data.
+
+## A useful rule of thumb
+
+Keep a database query as `IQueryable<T>` while composing filters and selecting the fields you need. Materialize it at a clear boundary before using the results as in-memory data, returning a completed response, or passing a collection to code that does not need to add database filters.
+
+Use async EF Core query methods in web requests so database I/O does not block a request thread while it waits. If a query does not translate, simplify or reshape it so the database-supported part runs before materialization, then apply any truly local operation to the smaller result set.
+
+## Next
+
+- See how EF Core starts and executes database queries in [Introduction to Entity Framework Core](/docs/introduction-to-entity-framework-core).
+- Configure the context and migrations in [Configuring a DbContext and Migrations](/docs/configuring-dbcontext-and-migrations).
+- Continue to [Seeding Data with EF Core](/docs/seeding-data-with-ef-core) to prepare predictable data for later query examples.
+
+For more detail, see Microsoft's documentation on [how queries work](https://learn.microsoft.com/ef/core/querying/).
