@@ -1,0 +1,106 @@
+---
+title: Querying Data with EF Core
+description: Build efficient LINQ queries with filtering, ordering, projections, pagination, related data, and intentional tracking.
+---
+
+EF Core lets you describe database queries with LINQ. A `DbSet<TEntity>` starts an `IQueryable<TEntity>` query; the provider translates supported operations and sends the query to the database when the results are needed. See [IEnumerable and IQueryable](/docs/ienumerable-and-iqueryable) for the difference between building a query and enumerating an in-memory sequence.
+
+## Filter and order before reading results
+
+Use `Where` to limit the rows, `OrderBy` and `ThenBy` to make their order explicit, and `Select` to choose the fields the caller needs. Keep these operations on the query before materializing it:
+
+```csharp
+public sealed record EmployeeSummary(int Id, string FirstName, string LastName);
+```
+
+Put the response type in its own file. The query below assumes the API uses it to return only the fields clients need:
+
+```csharp
+using System.Linq;
+using Microsoft.EntityFrameworkCore;
+
+const int page = 1;
+const int pageSize = 20;
+var searchTerm = "Garcia";
+
+var employees = await dbContext.Employees
+    .AsNoTracking()
+    .Where(employee =>
+        employee.FirstName.Contains(searchTerm) ||
+        employee.LastName.Contains(searchTerm))
+    .OrderBy(employee => employee.LastName)
+    .ThenBy(employee => employee.Id)
+    .Skip((page - 1) * pageSize)
+    .Take(pageSize)
+    .Select(employee => new EmployeeSummary(
+        employee.Id,
+        employee.FirstName,
+        employee.LastName))
+    .ToListAsync();
+```
+
+The code filters the rows, establishes a stable sort, takes one page, selects a small response shape, and finally executes the query with `ToListAsync`. It does not first load every employee and filter the list in memory.
+
+The sample uses constant page values to focus on the query. An API that accepts a page number or page size from a request should validate them before calculating `Skip`: require a positive page, require a positive page size, and set a reasonable maximum page size. Be consistent about whether page numbers start at zero or one.
+
+## Paginate with a stable order
+
+`Skip` and `Take` implement offset pagination. Always apply filtering and ordering before them. Include a unique tie-breaker such as the primary key in the ordering: if multiple employees have the same last name, `ThenBy(employee => employee.Id)` gives the database a deterministic order for the page.
+
+If clients need a total count or page count, the application can issue a separate `CountAsync` query with the same filter. That is additional database work, so include it only when the API contract needs it.
+
+Offset pagination is straightforward for small and medium result sets. For very large tables or data that changes frequently, skipping many rows can become expensive or produce shifting pages. Consider **keyset pagination** (also called cursor pagination) for those cases: the next request asks for rows after the last sort key it received. Choose the pagination method based on the data size and client needs.
+
+## Include related data only when the response needs it
+
+EF Core does not automatically load every related entity. Use `Include` when a query needs a navigation property:
+
+```csharp
+var employee = await dbContext.Employees
+    .Include(employee => employee.Benefits)
+    .SingleOrDefaultAsync(employee => employee.Id == employeeId);
+```
+
+This example assumes the employee model has a `Benefits` navigation property, which is added in the later [modeling guide](/docs/modeling-data-with-ef-core). It asks EF Core to load those related rows as part of the query. Loading multiple large collections can increase the amount of data returned, so do not add `Include` indiscriminately. For an API response, projecting directly to a response model is often more precise than loading a complete entity graph and serializing it.
+
+When a query needs only selected scalar fields, a projection can avoid retrieving unused columns:
+
+```csharp
+var employee = await dbContext.Employees
+    .Where(employee => employee.Id == employeeId)
+    .Select(employee => new EmployeeSummary(
+        employee.Id,
+        employee.FirstName,
+        employee.LastName))
+    .SingleOrDefaultAsync();
+```
+
+Check the behavior of the target provider for operations such as text search and ordering. For example, case sensitivity and string comparison rules can vary with the database and its collation.
+
+## Choose tracking behavior
+
+By default, EF Core tracks entity instances returned from a query. Tracking lets the context detect changes to those entities and persist them later with `SaveChangesAsync`. Use tracking when the application intends to modify a loaded entity in that context.
+
+For a read-only query, `AsNoTracking` tells EF Core not to track returned entities. This can reduce change-tracking work when results are only used to build a response. A projection that returns only scalar values or a DTO without entity instances is not tracked as an entity result; using `AsNoTracking` in the example above still makes the read-only intent clear.
+
+Avoid turning tracking off globally unless the application has a clear plan for write operations. If a later update loads entities without tracking, setting their properties alone will not tell the context to save those changes.
+
+## Direct DbContext use or a repository?
+
+`DbContext` provides a unit of work and query surface, and its `DbSet` properties act as entry points for entity operations. For a small application, injecting the context into an application service or controller may be the simplest design.
+
+A repository is also reasonable when it provides a useful boundary—for example, when it encapsulates a domain-specific operation or keeps a complex query reusable. The earlier [Repository Pattern](/docs/repository-pattern) lesson introduces that option. Neither approach is universally best: avoid a thin wrapper that merely repeats every `DbContext` method, but keep an abstraction when it makes the application's behavior easier to understand or change.
+
+## Keep database work intentional
+
+- Filter and project in the query before materialization so the database returns only the needed data.
+- Use async EF Core methods such as `ToListAsync`, `SingleOrDefaultAsync`, and `CountAsync` for database I/O in request-handling code.
+- Do not enumerate the same query repeatedly without intending to execute it more than once.
+- Inspect generated SQL and measure important queries when performance matters.
+- Keep request validation and response mapping separate from the query so the API exposes only the fields it intends to expose.
+
+## Next
+
+- Start with known records in [Seeding Data with EF Core](/docs/seeding-data-with-ef-core).
+- Persist API changes with [Adding, Updating, and Deleting Data](/docs/adding-updating-and-deleting-data).
+- Learn how [IEnumerable and IQueryable](/docs/ienumerable-and-iqueryable) differ when LINQ runs over a query provider or an in-memory collection.

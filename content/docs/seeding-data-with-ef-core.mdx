@@ -1,0 +1,100 @@
+---
+title: Seeding Data with EF Core
+description: Choose between model-managed reference data and environment-specific initialization for development and tests.
+---
+
+A newly created database has a schema but usually contains no application data. **Seeding** means adding a known starting set of records. It can make a local demo easier to explore or give a test a predictable starting point, but seed data should be chosen and run deliberately.
+
+EF Core supports more than one approach. Two common choices solve different problems: **model-managed data** for small, fixed values that belong with the schema, and **application or test initialization** for data that is specific to an environment or test run.
+
+## Model-managed data for fixed values
+
+`HasData` configures model-managed data in `OnModelCreating`. EF Core includes changes to this data in migrations. It is a good fit for a small set of stable reference values, such as a fixed list of statuses that the application expects to exist:
+
+```csharp
+protected override void OnModelCreating(ModelBuilder modelBuilder)
+{
+    base.OnModelCreating(modelBuilder);
+
+    modelBuilder.Entity<EmployeeStatus>().HasData(
+        new EmployeeStatus { Id = 1, Name = "Active" },
+        new EmployeeStatus { Id = 2, Name = "Inactive" });
+}
+```
+
+The explicit key values are important: EF Core needs stable keys to compare model-managed records across migrations. After adding or changing `HasData`, create and review a migration, then apply it to the database. Editing the seed definition is not the same as changing a live row immediately; the migration carries the change.
+
+This approach is not intended for generating a large, changing dataset or for inserting environment-specific records. It can also make migrations harder to maintain if the data changes frequently.
+
+EF Core 9 and later also provide `UseSeeding` and `UseAsyncSeeding`, recommended APIs for custom seed logic that runs as part of database initialization. Check that these APIs are available in the project's EF Core version and understand when the configured callback runs before using them; they are not a reason to put changing production data into `HasData`. See the [EF Core seeding guidance](https://learn.microsoft.com/ef/core/modeling/data-seeding) for version-specific options.
+
+## Development data through an explicit initializer
+
+For a local learning database, a small initializer can add sample records when the table is empty. This example assumes the `Employee` entity and `AppDbContext` introduced in the previous pages and that the schema has already been created by migrations:
+
+```csharp
+using System;
+using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+
+public static class DevelopmentSeedData
+{
+    public static async Task InitializeAsync(AppDbContext dbContext)
+    {
+        if (await dbContext.Employees.AnyAsync())
+        {
+            return;
+        }
+
+        dbContext.Employees.AddRange(
+            new Employee { FirstName = "Alex", LastName = "Sample" },
+            new Employee { FirstName = "Riley", LastName = "Example" });
+
+        await dbContext.SaveChangesAsync();
+    }
+}
+```
+
+The `AnyAsync` check makes this simple initializer safe to run more than once when the table is already populated: it will not add the same sample set again. It assumes an empty table should receive the full sample set. For more complex seed data, use stable unique values and check or upsert each record intentionally rather than relying on a broad “table is empty” check.
+
+To run it only for local development, create a scope after building the app:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await DevelopmentSeedData.InitializeAsync(dbContext);
+}
+
+app.Run();
+```
+
+`AppDbContext` is scoped, so resolving it requires a scope. The `await using` statement disposes that scope after the initializer finishes. This snippet assumes the app has already registered the context and that migrations were applied separately. It does not run migrations or seed production data.
+
+## Give tests their own data
+
+Tests should arrange the records they need as part of the test setup, using an isolated database or a fresh database for each test or test collection. That makes the test's starting state visible and prevents one test from depending on another test's seed order.
+
+Development sample records and test fixtures have different lifetimes. Avoid sharing mutable test data across parallel tests, and do not use real customer or employee information as sample data. Later, [integration testing with Testcontainers](/docs/integration-testing-with-testcontainers) will show one way to run tests against an isolated database service.
+
+## Choose the approach deliberately
+
+| Need | A reasonable starting point |
+| --- | --- |
+| A few fixed reference rows that change with the model | Model-managed data such as `HasData`, followed by a reviewed migration |
+| Convenient local records for exploring an API | An explicit, development-only initializer |
+| Known records needed by an automated test | Test setup that creates isolated data and cleans up with the test database |
+| Large or frequently changing datasets | A purpose-built import or data-loading process |
+
+Avoid two risky shortcuts: do not seed real personal data into a sample database, and do not unconditionally apply migrations or insert sample records every time a production instance starts. Production data changes need a deployment and data-retention plan appropriate to the application.
+
+## Next
+
+- Learn how to filter, order, page, and project database results in [Querying Data with EF Core](/docs/querying-data-with-ef-core).
+- Continue with [Adding, Updating, and Deleting Data](/docs/adding-updating-and-deleting-data) to persist changes from API requests.
+- Review how the database connection and schema are configured in [Configuring a DbContext and Migrations](/docs/configuring-dbcontext-and-migrations).

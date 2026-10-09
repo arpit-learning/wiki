@@ -1,0 +1,139 @@
+---
+title: Adding, Updating, and Deleting Data
+description: Use EF Core change tracking and SaveChangesAsync to create, update, and delete records safely through an API.
+---
+
+EF Core does not write every change to the database as soon as a property is assigned. A `DbContext` tracks entities and their state. The application makes the intended changes, then calls `SaveChangesAsync` to send them to the database.
+
+The context commonly tracks entities in one of these states:
+
+| State | Meaning |
+| --- | --- |
+| `Added` | Insert this entity when changes are saved |
+| `Unchanged` | The entity is being tracked and has no detected changes |
+| `Modified` | Update the changed values when changes are saved |
+| `Deleted` | Delete this entity when changes are saved |
+
+`DbSet.Add` marks an entity as `Added`; `Remove` marks a tracked entity as `Deleted`. When an entity is loaded through a tracking query, EF Core watches its properties and detects changes. `SaveChangesAsync` persists the pending changes for the context, usually as a database transaction.
+
+## Create a record
+
+Accept a request model that describes the fields the client is allowed to provide, then create a new entity from those fields. Do not ask the client to supply database-managed values such as a generated key:
+
+The action fragments below belong in the existing `EmployeesController` and assume the controller has access to `_dbContext`, as well as the request and response models shown or introduced earlier. Include `using Microsoft.EntityFrameworkCore;` in the controller file for the async query methods.
+
+```csharp
+[HttpPost]
+public async Task<ActionResult<EmployeeResponse>> Create(
+    [FromBody] CreateEmployeeRequest request,
+    CancellationToken cancellationToken)
+{
+    var employee = new Employee
+    {
+        FirstName = request.FirstName,
+        LastName = request.LastName,
+        Email = request.Email
+    };
+
+    _dbContext.Employees.Add(employee);
+    await _dbContext.SaveChangesAsync(cancellationToken);
+
+    var response = new EmployeeResponse(
+        employee.Id,
+        employee.FirstName,
+        employee.LastName,
+        employee.Email);
+
+    return CreatedAtAction(
+        nameof(GetById),
+        new { id = employee.Id },
+        response);
+}
+```
+
+`Add` marks the new employee as `Added`; the insert happens when `SaveChangesAsync` runs. After that save, EF Core updates a generated key such as `Id`, so the API can include it in the response and in the `Location` header created by `CreatedAtAction`.
+
+This action assumes the controller has a `GetById` action and that request validation has been configured. Validate the request before saving; required-field, length, and business-rule validation belong at the API boundary. A successful creation commonly returns `201 Created` with a link to the new resource.
+
+## Update a record that exists
+
+For an update, load the existing row using the identifier from the route. If no row exists, return `404 Not Found`. Then copy only the allowed request values onto the tracked entity:
+
+```csharp
+[HttpPut("{id:int}")]
+public async Task<ActionResult<EmployeeResponse>> Update(
+    int id,
+    [FromBody] UpdateEmployeeRequest request,
+    CancellationToken cancellationToken)
+{
+    var employee = await _dbContext.Employees
+        .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+
+    if (employee is null)
+    {
+        return NotFound();
+    }
+
+    employee.FirstName = request.FirstName;
+    employee.LastName = request.LastName;
+    employee.Email = request.Email;
+
+    await _dbContext.SaveChangesAsync(cancellationToken);
+
+    return Ok(new EmployeeResponse(
+        employee.Id,
+        employee.FirstName,
+        employee.LastName,
+        employee.Email));
+}
+```
+
+Because the query uses the context's default tracking behavior, EF Core knows this entity is being tracked. It detects the changed properties and sends an update when `SaveChangesAsync` is called. If an action uses `AsNoTracking`, it must deliberately attach or update the entity before saving; loading a tracked entity is simpler for this beginner example.
+
+Do not deserialize an arbitrary request directly into a database entity and then call `Update` without reviewing which fields the client is allowed to change. That can overwrite values the client should not control, including keys, server-managed fields, or navigation properties. A request model plus explicit mapping makes the update contract visible and reduces accidental overposting.
+
+## Delete a record
+
+Delete also begins by finding the record. If it does not exist, return the API's documented not-found result; if it does, mark it for deletion and save:
+
+```csharp
+[HttpDelete("{id:int}")]
+public async Task<IActionResult> Delete(
+    int id,
+    CancellationToken cancellationToken)
+{
+    var employee = await _dbContext.Employees
+        .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+
+    if (employee is null)
+    {
+        return NotFound();
+    }
+
+    _dbContext.Employees.Remove(employee);
+    await _dbContext.SaveChangesAsync(cancellationToken);
+
+    return NoContent();
+}
+```
+
+`Remove` marks the tracked entity as `Deleted`; the SQL delete happens at `SaveChangesAsync`. `204 No Content` is a common successful response when the API does not return a body. If the database has related records, its foreign-key and delete behaviors determine whether those records are restricted, cascaded, or need to be handled explicitly.
+
+## Validate and handle failures deliberately
+
+These examples omit controller setup and request-model declarations to focus on persistence. In a real API:
+
+- Validate the request and return `400 Bad Request` for invalid client input.
+- Return `404 Not Found` when an update or delete targets a missing record.
+- Do not include connection strings, database errors, or private entity fields in client-facing error messages.
+- Let the application's standard exception handling log unexpected database failures; do not catch every exception and return a success-shaped response.
+- If the model uses optimistic concurrency tokens, decide how to handle `DbUpdateConcurrencyException` when another request changes the row first.
+- Pass a request cancellation token to database operations when available.
+
+The exact response for a repeated delete or a conflicting update is part of the API contract. Choose and document the behavior rather than relying on an accidental database exception.
+
+## Next
+
+- Learn how EF Core entities and relationships are configured in [Modeling Data with EF Core](/docs/modeling-data-with-ef-core).
+- Review the data-access choices in [Querying Data with EF Core](/docs/querying-data-with-ef-core).
+- See [Designing API Sub-Resources](/docs/designing-api-subresources) for route choices when changing related collections.
