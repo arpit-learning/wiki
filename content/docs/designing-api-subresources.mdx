@@ -66,23 +66,29 @@ A response could contain a list of benefit response models:
 ]
 ```
 
-An entity can hold a collection that represents the relationship in the application model. The earlier examples use an `Employee` record, so extend that definition with a benefits collection instead of declaring a second type with the same name:
+An entity can hold a collection that represents the relationship in the application model. The earlier request-model lesson already defines `Employee` as a class. Add a benefit type and a collection to that existing class:
 
 ```csharp
 using System.Collections.Generic;
 
-public sealed record EmployeeBenefit(
-    int Id,
-    string Type,
-    decimal MonthlyCost);
-
-public sealed record Employee(int Id, string FirstName, string LastName)
+public sealed class EmployeeBenefit
 {
-    public List<EmployeeBenefit> Benefits { get; init; } = [];
+    public int Id { get; set; }
+    public string Type { get; set; } = string.Empty;
+    public decimal MonthlyCost { get; set; }
+}
+
+public sealed class Employee
+{
+    public int Id { get; set; }
+    public required string FirstName { get; set; }
+    public required string LastName { get; set; }
+    public string? Email { get; set; }
+    public List<EmployeeBenefit> Benefits { get; set; } = [];
 }
 ```
 
-The record declaration replaces the earlier, shorter `Employee` declaration and keeps its existing constructor parameters. Later, when the course moves to EF Core, the persistence entity can be reshaped to suit that model. The model and API response are separate: the endpoint maps an `EmployeeBenefit` to the smaller `BenefitResponse` shown below.
+This is an update to the existing `Employee` model, not a second class declaration to add alongside it. The model and API response are separate: the endpoint maps an `EmployeeBenefit` to the smaller `BenefitResponse` shown below. EF Core configuration and relationships are covered in the later data-modeling pages.
 
 The next example shows the action in the controller for clarity. In the course project, add the action to the existing `EmployeesController`; do not create a second controller class with the same name.
 

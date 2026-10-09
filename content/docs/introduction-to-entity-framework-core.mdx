@@ -11,14 +11,15 @@ An API needs a place to store data. So far, the course has used an in-memory lis
 
 A relational database stores information in **tables**. A table has **columns** that describe fields and **rows** that hold individual records. For example, an `Employees` table could have `Id`, `FirstName`, and `LastName` columns. Each employee is one row.
 
-In EF Core, a C# type that is mapped to stored data is called an **entity**. The earlier in-memory example used an `Employee` record; for this walkthrough, replace it with a class whose properties can be changed as EF Core tracks updates. EF Core can map different C# shapes, but a mutable class is a common, straightforward starting point:
+In EF Core, a C# type that is mapped to stored data is called an **entity**. The earlier request-model lesson already defines `Employee` as a class with an ID, required first and last names, and an optional email address. That class is a straightforward starting point for this course's EF Core model:
 
 ```csharp
 public sealed class Employee
 {
     public int Id { get; set; }
-    public string FirstName { get; set; } = string.Empty;
-    public string LastName { get; set; } = string.Empty;
+    public required string FirstName { get; set; }
+    public required string LastName { get; set; }
+    public string? Email { get; set; }
 }
 ```
 
