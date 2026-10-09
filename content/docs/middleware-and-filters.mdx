@@ -1,0 +1,142 @@
+---
+title: Middleware and Filters
+description: Understand ASP.NET Core middleware ordering, short-circuiting, MVC filters, and endpoint filters.
+---
+
+ASP.NET Core applications often need behavior that applies to more than one endpoint—for example, HTTPS redirection, authentication, error handling, or request logging. Two mechanisms can add this behavior: **middleware** in the HTTP request pipeline and **filters** in MVC or Minimal API endpoint execution.
+
+They run at different stages and have different information available. Choosing the correct one starts with understanding the request flow.
+
+## The middleware pipeline
+
+Middleware components are arranged in the order the application adds them. Each component can:
+
+1. Inspect or change the incoming request.
+2. Call the next component.
+3. Inspect or change the outgoing response after the next component completes.
+4. End the pipeline early without calling the next component.
+
+For example:
+
+```csharp
+using System.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+var builder = WebApplication.CreateBuilder(args);
+var app = builder.Build();
+var requestLogger = app.Services
+    .GetRequiredService<ILoggerFactory>()
+    .CreateLogger("RequestTiming");
+
+app.Use(async (context, next) =>
+{
+    var startedAt = Stopwatch.GetTimestamp();
+    await next(context);
+
+    var elapsed = Stopwatch.GetElapsedTime(startedAt);
+    requestLogger.LogInformation(
+        "HTTP {Method} returned {StatusCode} in {ElapsedMilliseconds} ms",
+        context.Request.Method,
+        context.Response.StatusCode,
+        elapsed.TotalMilliseconds);
+});
+```
+
+The code before `await next(context)` runs on the way in. The `next` call passes the request to later middleware and, if routing selects one, an endpoint. The code after it runs when the downstream pipeline completes normally. This example logs elapsed time instead of changing response headers after an endpoint may have started sending the response.
+
+## Order matters
+
+Since each middleware receives control in registration order, changing the order can change the behavior of the app. An error handler needs to be early enough to observe downstream failures. Authentication must run before authorization needs the authenticated user. Routing must identify endpoint metadata before endpoint-specific behavior is applied.
+
+A simplified controller application might look like this:
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddControllers();
+
+var app = builder.Build();
+
+app.UseHttpsRedirection();
+
+// Add these only after configuring authentication and authorization services.
+// app.UseAuthentication();
+// app.UseAuthorization();
+
+app.MapControllers();
+
+app.Run();
+```
+
+Real applications may need additional configuration and middleware. Follow the framework's recommended order for the features in use; do not copy a pipeline blindly into an application that has different requirements.
+
+## Short-circuiting
+
+Middleware can handle a request without passing it onward. For example, a component may reject an invalid request before it reaches an endpoint:
+
+```csharp
+app.Use(async (context, next) =>
+{
+    if (!context.Request.Headers.ContainsKey("X-Demo-Key"))
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsync("Required demo header is missing.");
+        return;
+    }
+
+    await next(context);
+});
+```
+
+If the header is absent, the component writes a response and returns without calling `next`; later middleware and endpoints do not run. This is called **short-circuiting**.
+
+This is a demonstration, not a recommended authentication scheme. Real authentication and authorization should use the framework's security features and an appropriate identity provider rather than a homemade header check.
+
+## Middleware and endpoints are different
+
+`app.Use(...)` adds middleware to the pipeline. `app.MapGet(...)` maps a route and method to an endpoint handler. An endpoint is selected as part of request processing; it is not interchangeable with middleware.
+
+Use middleware for behavior that applies broadly to requests or that needs to run before or after endpoint execution. Use an endpoint handler for the operation associated with a specific route.
+
+## What are MVC filters?
+
+An **MVC filter** runs within the MVC action lifecycle, after routing has selected a controller endpoint. A filter can work with action-specific context such as action arguments and model state—information general middleware does not naturally own.
+
+Common MVC filter categories include:
+
+| Filter category | Typical role |
+| --- | --- |
+| Authorization | Participate in decisions about whether an action may run. Prefer the framework's authorization policies and middleware for ordinary access control. |
+| Resource | Wrap much of the MVC action pipeline, including model binding. |
+| Action | Run before and after an action method. |
+| Exception | Handle certain unhandled exceptions raised inside MVC action execution. |
+| Result | Run around the execution of an MVC action result. |
+
+Filters can be registered globally or applied to selected controllers/actions. Each type has specific ordering and execution rules; use the MVC documentation when implementing custom filters.
+
+## Endpoint filters
+
+Minimal APIs have a separate feature called **endpoint filters**. They can run logic before and after a Minimal API handler and can inspect handler arguments. They are not the same as MVC action filters.
+
+Use an endpoint filter when the behavior belongs to Minimal API endpoints and needs endpoint-specific context. Use middleware when behavior belongs to the broader HTTP pipeline. Avoid adding a custom abstraction when built-in authentication, authorization, exception handling, validation, or logging features already meet the need.
+
+## Which should I choose?
+
+| Need | Starting point |
+| --- | --- |
+| Handle a concern across the HTTP application | Middleware or a built-in middleware feature. |
+| Work with arguments for a Minimal API handler | Endpoint filter, when a built-in option is insufficient. |
+| Work with MVC action arguments or results | MVC filter, when a built-in option is insufficient. |
+| Selectively allow access to an API | ASP.NET Core authentication and authorization policies. |
+
+<Callout type="idea" title="Prefer framework features first">
+  Custom middleware and filters affect request processing and can be difficult
+  to debug when their order is unclear. Start with a built-in feature, and add
+  custom behavior only when you can explain why it belongs at that stage.
+</Callout>
+
+## Further reading
+
+- [ASP.NET Core middleware](https://learn.microsoft.com/aspnet/core/fundamentals/middleware)
+- [ASP.NET Core filters](https://learn.microsoft.com/aspnet/core/mvc/controllers/filters)
+- [Minimal API endpoint filters](https://learn.microsoft.com/aspnet/core/fundamentals/minimal-apis/min-api-filters)

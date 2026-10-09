@@ -1,0 +1,130 @@
+---
+title: Moving from Minimal APIs to Controllers
+description: Refactor a Minimal API endpoint into a controller action while preserving its route and HTTP behavior.
+---
+
+Minimal APIs and controllers can expose the same HTTP API. Moving an endpoint from one style to the other is a code-organization change; clients should not have to learn a different URL or response just because the server's code moved.
+
+This guide uses one `GET /employees/{id}` endpoint to show the change.
+
+## Start with a Minimal API route
+
+```csharp
+app.MapGet("/employees/{id:int}", (
+    int id,
+    IEmployeeRepository repository) =>
+{
+    var employee = repository.GetById(id);
+    if (employee is null)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Ok(new EmployeeResponse(
+        employee.Id,
+        employee.FirstName,
+        employee.LastName));
+});
+```
+
+The route handler receives an ID and a repository, looks up the record, and returns either `404 Not Found` or `200 OK` with a response model.
+
+## Move the same behavior into a controller
+
+```csharp
+using Microsoft.AspNetCore.Mvc;
+
+[ApiController]
+[Route("employees")]
+public sealed class EmployeesController : ControllerBase
+{
+    private readonly IEmployeeRepository _repository;
+
+    public EmployeesController(IEmployeeRepository repository)
+    {
+        _repository = repository;
+    }
+
+    [HttpGet("{id:int}")]
+    public ActionResult<EmployeeResponse> GetById([FromRoute] int id)
+    {
+        var employee = _repository.GetById(id);
+        if (employee is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(new EmployeeResponse(
+            employee.Id,
+            employee.FirstName,
+            employee.LastName));
+    }
+}
+```
+
+The class-level `[Route("employees")]` supplies the prefix, and `[HttpGet("{id:int}")]` supplies the rest of the route. Together they still match `GET /employees/12`. The action performs the same lookup and returns the same kinds of response as the original handler.
+
+The route parameter is marked `[FromRoute]` to show where `id` comes from. ASP.NET Core can often infer this, but the attribute makes the source explicit.
+
+## Enable the new controller
+
+Add controller services before building the app and map the controller endpoints:
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddControllers();
+builder.Services.AddScoped<IEmployeeRepository, EmployeeRepository>();
+
+var app = builder.Build();
+app.MapControllers();
+app.Run();
+```
+
+If controller services or route mapping are missing, the application may start but the controller route will not behave as expected. Confirm that all required services are registered and `MapControllers()` is present.
+
+## Refactor without changing the API contract
+
+When moving more routes, make the change incrementally:
+
+1. Record the current method, route, accepted inputs, response status, and response body.
+2. Move one endpoint and keep its public route unchanged.
+3. Preserve the relevant request and response models.
+4. Run the existing integration tests and add or update tests for the same HTTP behavior.
+5. Move the next endpoint only after the first route still behaves as expected.
+
+Changing `/employees/{id}` to `/api/employees/{id}`, changing `200` to `204`, or returning a different JSON shape are API changes, not just refactoring. Sometimes those changes are desirable, but plan and communicate them separately.
+
+## Constructor injection
+
+In a Minimal API, a handler can receive a service as a parameter:
+
+```csharp
+app.MapGet("/employees", (IEmployeeRepository repository) =>
+    Results.Ok(repository.GetAll()));
+```
+
+In a controller, dependencies are commonly supplied to the constructor:
+
+```csharp
+public EmployeesController(IEmployeeRepository repository)
+{
+    _repository = repository;
+}
+```
+
+Constructor injection makes the controller's dependencies visible in one place. If a controller needs many unrelated services, that can be a sign to separate responsibilities—but do not create extra layers automatically. First identify which operations belong together and why the controller needs each dependency.
+
+## Validation and error responses
+
+With `[ApiController]`, MVC integrates model validation and may automatically return `400` for invalid model state. Custom validation systems such as FluentValidation require the integration or explicit invocation used by the application; registration alone does not guarantee every request will be validated.
+
+Keep the externally visible contract stable as you refactor. An integration test that sends an HTTP request and asserts status code and response content is a useful safeguard. See [Writing Your First API Tests](/docs/writing-api-tests) and [Validating API Requests](/docs/api-validation).
+
+<Callout type="idea" title="Refactor in small, observable steps">
+  Make one structural change at a time, then run the tests. If behavior changes,
+  you can identify which step caused it instead of debugging a large rewrite.
+</Callout>
+
+## Next
+
+Continue to [Logging in ASP.NET Core](/docs/logging) to learn how to record useful operational information.

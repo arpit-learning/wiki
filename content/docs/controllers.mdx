@@ -1,0 +1,149 @@
+---
+title: What Is a Controller?
+description: Learn how ASP.NET Core controllers organize related HTTP actions and how requests are routed to them.
+---
+
+A **controller** is a C# class that groups related HTTP actions. In ASP.NET Core MVC, an **action** is a public method that handles a matching request. Controllers are one way to organize an API; Minimal APIs are another.
+
+Controllers can be useful when a project benefits from grouping several related routes together, sharing constructor-injected services, or using MVC features such as filters. They are not required for every API—choose the style that makes the application easiest for its team to understand.
+
+## A small controller
+
+```csharp
+using Microsoft.AspNetCore.Mvc;
+
+[ApiController]
+[Route("employees")]
+public sealed class EmployeesController : ControllerBase
+{
+    private readonly IEmployeeRepository _repository;
+
+    public EmployeesController(IEmployeeRepository repository)
+    {
+        _repository = repository;
+    }
+
+    [HttpGet]
+    public ActionResult<IReadOnlyList<EmployeeResponse>> GetAll()
+    {
+        var employees = _repository.GetAll()
+            .Select(employee => new EmployeeResponse(
+                employee.Id,
+                employee.FirstName,
+                employee.LastName));
+
+        return Ok(employees.ToList());
+    }
+
+    [HttpGet("{id:int}")]
+    public ActionResult<EmployeeResponse> GetById(int id)
+    {
+        var employee = _repository.GetById(id);
+        if (employee is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(new EmployeeResponse(
+            employee.Id,
+            employee.FirstName,
+            employee.LastName));
+    }
+}
+```
+
+The route attributes combine to define the URLs:
+
+- `[Route("employees")]` sets the controller's route prefix.
+- `[HttpGet]` maps a `GET` request to `/employees`.
+- `[HttpGet("{id:int}")]` maps a `GET` request such as `/employees/12` to `GetById`.
+- The `id` parameter receives the value from the route.
+
+The controller receives `IEmployeeRepository` through its constructor. This is **constructor injection**: ASP.NET Core supplies the registered service when it creates the controller. The action asks the repository for data without constructing its own storage implementation.
+
+`ControllerBase` provides API-oriented helpers such as `Ok()` and `NotFound()`. `ActionResult<T>` allows an action to return either the expected value or an HTTP result such as `404 Not Found`.
+
+The `EmployeeResponse` type is a placeholder for a response model, for example:
+
+```csharp
+public sealed record EmployeeResponse(
+    int Id,
+    string FirstName,
+    string LastName);
+```
+
+Returning a response model makes it clear which fields the API exposes.
+
+## What `[ApiController]` does
+
+`[ApiController]` opts a controller into API-specific behavior. Depending on the framework version and configuration, this includes:
+
+- Requiring attribute-based routing for controller actions.
+- Inferring common binding sources for action parameters.
+- Automatically returning a `400 Bad Request` response when model validation fails.
+- Returning problem-details-style error information for certain client errors.
+
+These behaviors help reduce repetitive code, but they do not implement every business rule. Check the target version's documentation and add explicit validation or authorization where the application requires it.
+
+### Bind parameters clearly
+
+ASP.NET Core can infer many parameter sources. Binding attributes make the contract more visible:
+
+```csharp
+[HttpGet]
+public ActionResult<IReadOnlyList<EmployeeResponse>> Search(
+    [FromQuery] string? name)
+{
+    // Search using the optional query value.
+    return Ok(Array.Empty<EmployeeResponse>());
+}
+```
+
+`[FromQuery]` indicates that `name` comes from a URL such as `/employees?name=Sam`. Common binding attributes include `[FromRoute]`, `[FromQuery]`, `[FromBody]`, `[FromHeader]`, and `[FromServices]`. Explicit binding is especially helpful when a method accepts values from several places.
+
+## Enable controller routing
+
+Register controllers before building the app, then map their routes:
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddControllers();
+
+var app = builder.Build();
+
+// Add these only after configuring authentication and authorization services.
+// app.UseAuthentication();
+// app.UseAuthorization();
+
+app.MapControllers();
+app.Run();
+```
+
+`AddControllers()` registers MVC controller services. `MapControllers()` makes attribute-routed controller actions available as endpoints. These methods have different roles: one configures services; the other maps request routes.
+
+When the application uses authentication and authorization, register the required services and place their middleware in the recommended order before mapping/executing protected endpoints. Without that configuration, the commented middleware is intentionally omitted.
+
+Controller construction also relies on dependency injection. Register application-specific services, such as the repository implementation, before `Build()`:
+
+```csharp
+builder.Services.AddScoped<IEmployeeRepository, EmployeeRepository>();
+```
+
+Use a lifetime that matches the service and its dependencies. For example, a database context is usually scoped to a request; a mutable shared in-memory list should not be registered as a singleton in a real concurrent application.
+
+## Controller or Minimal API?
+
+Both approaches can build web APIs. A small Minimal API can keep a simple application direct and compact. Controllers give related actions a class boundary and provide established MVC conventions. Neither style automatically creates good separation or clean architecture; the handler or action still needs to be understandable and maintainable.
+
+<Callout type="idea" title="Choose based on the application">
+  Start with the approach that makes the first few routes easiest to follow.
+  Reconsider the structure when real complexity appears; do not choose a style
+  based only on a fixed endpoint count or a claim that one style is always best.
+</Callout>
+
+## Next
+
+- See how to move an existing endpoint while preserving its contract in [Moving from Minimal APIs to Controllers](/docs/converting-to-controllers).
+- Learn about [logging in ASP.NET Core](/docs/logging) and the [request pipeline](/docs/middleware-and-filters).
+
+For a full reference, see Microsoft's [Web API controllers documentation](https://learn.microsoft.com/aspnet/core/web-api).

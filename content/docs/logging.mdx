@@ -1,0 +1,120 @@
+---
+title: Logging in ASP.NET Core
+description: Use structured logs and severity levels to understand an application's behavior without exposing sensitive information.
+---
+
+When an application runs, it is useful to know what it is doing and why a request failed. **Logging** records selected events so developers and operators can investigate behavior after the fact.
+
+Logging is different from returning an error to an API client. A log is for the people responsible for operating the application; an HTTP response is part of the API contract and should contain only information the caller needs.
+
+## Use `ILogger<T>`
+
+ASP.NET Core provides the `ILogger<T>` interface. The generic type usually identifies the class that writes the message, which helps organize and filter logs.
+
+```csharp
+using Microsoft.Extensions.Logging;
+
+public sealed class EmployeeService
+{
+    private readonly ILogger<EmployeeService> _logger;
+
+    public EmployeeService(ILogger<EmployeeService> logger)
+    {
+        _logger = logger;
+    }
+
+    public void RefreshCache(string requestId)
+    {
+        _logger.LogInformation(
+            "Refreshing employee cache for request {RequestId}",
+            requestId);
+    }
+}
+```
+
+ASP.NET Core registers logging services by default, so application services can receive `ILogger<T>` through dependency injection. In a controller, inject `ILogger<EmployeesController>` through the controller constructor.
+
+## Choose a log level
+
+Levels communicate how important a message is. The configured logging providers and filters determine which levels are recorded in each environment.
+
+| Level | Typical use |
+| --- | --- |
+| `Trace` | Very detailed diagnostic events, usually enabled only temporarily. |
+| `Debug` | Information useful while diagnosing development or test behavior. |
+| `Information` | Meaningful milestones in normal application operation. |
+| `Warning` | An unexpected condition that was handled, but may need attention. |
+| `Error` | An operation failed and needs investigation. |
+| `Critical` | A failure that threatens the application's ability to continue. |
+
+Choose a level based on the event's operational meaning, not just how easy it is to call. A routine request is not necessarily a warning. A handled missing resource may not need an error log for every request.
+
+## Prefer structured message templates
+
+The placeholders in this message template are named fields:
+
+```csharp
+_logger.LogInformation(
+    "Refreshing employee cache for request {RequestId}",
+    requestId);
+```
+
+Logging providers can store `RequestId` separately from the rendered message, which makes it easier to search and filter. Avoid interpolating values into a string:
+
+```csharp
+// Avoid: the value is embedded in the message rather than preserved as a field.
+_logger.LogInformation($"Refreshing employee cache for request {requestId}");
+```
+
+Structured placeholders are not C# interpolation. Keep the message template stable and provide each value as a separate argument.
+
+## Log failures with context
+
+When an operation fails, include the exception object so the logging provider can record diagnostic details:
+
+```csharp
+try
+{
+    await employeeService.RefreshAsync(cancellationToken);
+}
+catch (Exception exception)
+{
+    logger.LogError(
+        exception,
+        "Failed to refresh employee data for request {RequestId}",
+        requestId);
+
+    throw;
+}
+```
+
+Catch an exception only when the code can handle it, add useful context, or translate it into an appropriate result. Catching and suppressing an exception can make a failed operation appear successful. Also avoid logging the same exception at every layer; duplicate logs make incidents harder to investigate.
+
+An application-wide exception handler or middleware is often a better place to log unhandled failures. Do not return stack traces or internal exception messages in production HTTP responses.
+
+## Protect data in logs
+
+Logs may be copied to centralized systems, retained for long periods, or viewed by people beyond the immediate development team. Do not log:
+
+- Passwords, authentication tokens, API keys, or session cookies.
+- Payment details or private identifiers.
+- Full request bodies without a specific, reviewed need.
+- Personal data that is not required to diagnose the event.
+
+Use stable request or correlation identifiers to connect related events. Review what your application logs and who can access those logs.
+
+<Callout type="idea" title="Log for a future investigation">
+  A useful log answers what operation was attempted, whether it succeeded, and
+  what safe identifier connects it to related work. It should not expose secrets
+  or repeat the entire request.
+</Callout>
+
+## Testing logging
+
+Most application tests should focus on behavior a user or API client observes. Test a log entry when it is itself a required behavior—for example, a compliance or operational requirement—and prefer checking the relevant event and structured values rather than every incidental message.
+
+## Next
+
+Continue to [Middleware and Filters](/docs/middleware-and-filters) to see how cross-cutting request behavior fits into the ASP.NET Core pipeline.
+
+For configuration details, see Microsoft's [logging in .NET and ASP.NET Core](https://learn.microsoft.com/aspnet/core/fundamentals/logging).
