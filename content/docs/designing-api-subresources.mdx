@@ -66,24 +66,25 @@ A response could contain a list of benefit response models:
 ]
 ```
 
-An entity can hold a collection that represents the relationship in the application model. For example, add a benefits collection to the existing `Employee` type:
+An entity can hold a collection that represents the relationship in the application model. The earlier examples use an `Employee` record, so extend that definition with a benefits collection instead of declaring a second type with the same name:
 
 ```csharp
-public sealed class EmployeeBenefit
-{
-    public int Id { get; set; }
-    public string Type { get; set; } = string.Empty;
-    public decimal MonthlyCost { get; set; }
-}
+using System.Collections.Generic;
 
-public sealed class Employee
+public sealed record EmployeeBenefit(
+    int Id,
+    string Type,
+    decimal MonthlyCost);
+
+public sealed record Employee(int Id, string FirstName, string LastName)
 {
-    public int Id { get; set; }
-    public List<EmployeeBenefit> Benefits { get; set; } = new();
+    public List<EmployeeBenefit> Benefits { get; init; } = [];
 }
 ```
 
-In a real course project, add the collection to the existing `Employee` class rather than replacing that class. The model and API response are separate: the endpoint can map an `EmployeeBenefit` to the smaller `BenefitResponse` shown below.
+The record declaration replaces the earlier, shorter `Employee` declaration and keeps its existing constructor parameters. Later, when the course moves to EF Core, the persistence entity can be reshaped to suit that model. The model and API response are separate: the endpoint maps an `EmployeeBenefit` to the smaller `BenefitResponse` shown below.
+
+The next example shows the action in the controller for clarity. In the course project, add the action to the existing `EmployeesController`; do not create a second controller class with the same name.
 
 For a controller whose class route is `[Route("employees")]`, the action route can be written as `"{employeeId:int}/benefits"`. Combined, they match `/employees/42/benefits`:
 

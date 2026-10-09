@@ -124,6 +124,8 @@ How the OpenAPI generator reads the file depends on the framework and packages i
 For example, a project using Swashbuckle can opt into its XML-comment integration like this:
 
 ```csharp
+using System.IO;
+
 builder.Services.AddSwaggerGen(options =>
 {
     var xmlFile = $"{typeof(Program).Assembly.GetName().Name}.xml";
