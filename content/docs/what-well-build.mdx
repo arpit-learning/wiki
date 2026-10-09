@@ -1,0 +1,54 @@
+---
+title: What We'll Build
+description: Follow the course project from a small in-memory employee API toward a complete web application.
+---
+
+This course follows one application as it grows. Starting with a small example makes it easier to see why each new concept is useful: instead of learning disconnected code snippets, you can watch the same application gain features and structure.
+
+## The project in one sentence
+
+We will build an API for managing employees. A client will be able to ask for employees, add one, and later update and validate information. As the application grows, we will improve how it organizes requests, tests behavior, and works with data.
+
+## What does “in memory” mean?
+
+The first version keeps its employee records in a list held in the application's memory. This is useful for learning because it avoids introducing a database before the request and response flow is familiar.
+
+There is an important limitation: memory belongs to the running process. If the application stops or restarts, the list is lost. Multiple application instances would also each have their own list. An in-memory list is therefore a teaching tool, not durable storage for a real employee system.
+
+<Callout type="warning" title="Use fictional data in practice">
+  The project is for learning. Do not put real employee information, credentials,
+  or sensitive identifiers into sample code, source control, or API requests.
+</Callout>
+
+## How the application grows
+
+The lessons build on a sequence of increasingly useful ideas:
+
+1. **Create a small API.** Define HTTP endpoints and return simple data.
+2. **Test the behavior.** Send requests to the application and check the responses.
+3. **Shape the API contract.** Decide what clients may send and what the API returns.
+4. **Separate responsibilities.** Organize request handling, validation, and data access so each part has a clear role.
+5. **Add application infrastructure.** Use controllers, logging, and middleware where they help.
+6. **Connect persistent storage.** Move beyond temporary in-memory data as the application requires it.
+
+These ideas build on one another. For example, tests written for the first endpoint can help verify that later refactoring keeps the API's behavior intact.
+
+## Following along with the examples
+
+You can follow the examples in order, typing and running the code yourself. The project source and exercises are available in the [course exercise repository](https://github.com/schneidenbach/building-apis-with-csharp-and-aspnet-core-exercises).
+
+Repository folders or lesson snapshots may represent different stages of the application. When comparing your project with an example, check which lesson or stage the example belongs to. Otherwise, a file that appears “missing” may simply be introduced later.
+
+<Callout type="idea" title="Build in small steps">
+  Run the app after each meaningful change. If an error appears, compare the
+  latest change with the last version that worked. Small steps make it easier to
+  find the cause and understand the fix.
+</Callout>
+
+## A note about scope
+
+The employee API is a vehicle for learning web-development concepts; it is not a complete design for an employee-management system. A production system would need to consider identity and permissions, privacy, input validation, persistent storage, error handling, audit requirements, and operational support. We will introduce several of these concepts as the application grows, but a course example should not be treated as a ready-made production blueprint.
+
+## Continue
+
+Start with [Minimal APIs in ASP.NET Core](/docs/minimal-apis) to create the first endpoints. If the terminal or SDK is new to you, visit the [Tooling Overview](/docs/tooling-overview) first.

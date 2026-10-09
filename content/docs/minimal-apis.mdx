@@ -1,0 +1,195 @@
+---
+title: Minimal APIs in ASP.NET Core
+description: Create simple HTTP endpoints with ASP.NET Core Minimal APIs and understand routes, handlers, request bodies, and responses.
+---
+
+An **endpoint** is a specific place in an API that handles a kind of request. For example, `GET /employees` could return a list of employees. ASP.NET Core Minimal APIs let you describe endpoints directly in `Program.cs`, which is a convenient way to start with a small API.
+
+## Create a project
+
+With the .NET SDK installed, create a starter Web API project:
+
+```bash
+dotnet new webapi -n EmployeeApi
+cd EmployeeApi
+```
+
+The SDK creates a project folder and starter files. Templates vary between SDK versions, so your `Program.cs` may not exactly match examples you find online. The request-handling ideas below apply even when the generated boilerplate differs.
+
+Open the project folder in your editor, then replace or adapt the generated endpoint code with the small example below.
+
+## Start with the application
+
+The first two lines of a minimal application create the application builder and build the app:
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+var app = builder.Build();
+```
+
+The **builder** is where configuration and services can be registered before the application starts. A **service** is an object that provides functionality to the rest of an application, such as access to a database or an email-sending component. `Build()` creates the application using that setup.
+
+## Add a first endpoint
+
+Add a route that returns a simple response:
+
+```csharp
+app.MapGet("/hello", () => "Hello from the API!");
+
+app.Run();
+```
+
+`MapGet` connects the HTTP method `GET` and the path `/hello` to a small function called a **handler**. When a matching request arrives, ASP.NET Core runs the handler and turns its return value into an HTTP response. `Run()` starts the web application.
+
+Run the app from the project directory:
+
+```bash
+dotnet run
+```
+
+The terminal prints one or more local addresses. Open the HTTPS address followed by `/hello`, or send a `GET` request to that URL with a browser or Postman. You should receive the text `Hello from the API!`. Keep the terminal open while testing; press `Ctrl+C` to stop the application.
+
+<Callout type="info" title="A route is not a file path">
+  The path `/hello` is an address handled by your application. It does not mean
+  ASP.NET Core is looking for a file named `hello` on disk.
+</Callout>
+
+## Build a tiny employee API
+
+The next example shows how a handler can work with data. Place the endpoint code before `app.Run()`, and put the `record` declarations after the top-level statements:
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+var app = builder.Build();
+
+var employees = new List<Employee>();
+var employeeRoutes = app.MapGroup("/employees");
+
+employeeRoutes.MapGet("", () => Results.Ok(employees));
+
+employeeRoutes.MapGet("/{id:int}", (int id) =>
+{
+    var employee = employees.SingleOrDefault(item => item.Id == id);
+    if (employee is null)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Ok(employee);
+});
+
+employeeRoutes.MapPost("", (CreateEmployeeRequest request) =>
+{
+    var employee = new Employee(
+        employees.Count + 1,
+        request.FirstName,
+        request.LastName);
+
+    employees.Add(employee);
+    return Results.Created($"/employees/{employee.Id}", employee);
+});
+
+app.Run();
+
+record Employee(int Id, string FirstName, string LastName);
+record CreateEmployeeRequest(string FirstName, string LastName);
+```
+
+The code uses two records:
+
+- `Employee` represents an employee stored by this example. The `Id` is assigned by the sample application.
+- `CreateEmployeeRequest` describes the two values the client sends when creating an employee.
+
+For this small example, the names line up. In larger applications, request and response types are often deliberately different from the type used to store data.
+
+## Read the routes and handlers
+
+### List employees
+
+```csharp
+employeeRoutes.MapGet("", () => Results.Ok(employees));
+```
+
+`MapGroup("/employees")` creates a common prefix for related employee routes. The empty route `""` on the group represents the group path itself, so this handler responds to `GET /employees`.
+
+`Results.Ok(employees)` returns the list with the HTTP status `200 OK`. If the list is empty, the response is still a successful response: its JSON body is an empty array (`[]`).
+
+### Find one employee
+
+```csharp
+employeeRoutes.MapGet("/{id:int}", (int id) =>
+{
+    var employee = employees.SingleOrDefault(item => item.Id == id);
+    if (employee is null)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Ok(employee);
+});
+```
+
+The `{id:int}` portion is a **route parameter**. ASP.NET Core reads that part of the URL, checks that it is an integer, and supplies it to the handler's `id` parameter.
+
+- `GET /employees/1` searches for an employee whose ID is `1`.
+- If a matching employee exists, the endpoint returns `200 OK` with the employee.
+- If there is no match, it returns `404 Not Found`.
+- A URL such as `/employees/abc` does not match this integer-constrained route.
+
+Returning a `404` is more useful to a client than returning an empty employee object: the client can tell that the requested resource does not exist.
+
+### Create an employee
+
+```csharp
+employeeRoutes.MapPost("", (CreateEmployeeRequest request) =>
+{
+    var employee = new Employee(
+        employees.Count + 1,
+        request.FirstName,
+        request.LastName);
+
+    employees.Add(employee);
+    return Results.Created($"/employees/{employee.Id}", employee);
+});
+```
+
+`POST /employees` asks the server to process a new employee. ASP.NET Core reads JSON from the request body and creates a `CreateEmployeeRequest` for the handler. For example:
+
+```json
+{
+  "firstName": "Sample",
+  "lastName": "Employee"
+}
+```
+
+The handler creates a record, adds it to the list, and returns `201 Created`. The response includes the created record, and the `Location` header points to the new resource.
+
+The `employees.Count + 1` ID assignment is intentionally simple. It is only adequate for this in-memory exercise: deleting an item or handling simultaneous requests can make it incorrect. A database or other reliable identifier strategy is needed for a real application.
+
+## How parameters reach a handler
+
+ASP.NET Core binds handler parameters from request data or from registered services. Common sources include:
+
+- **Route values**, such as the `id` in `/employees/1`.
+- **Query values**, such as `?page=2`.
+- **The request body**, such as the JSON sent to `POST /employees`.
+- **Services**, such as a logger or application-specific component registered in dependency injection.
+
+The route and parameter types often make the source clear, as in `(int id)` matching `/{id:int}`. When it is not obvious, binding attributes such as `[FromRoute]`, `[FromQuery]`, `[FromBody]`, and `[FromServices]` can make the source explicit. The exact binding rules depend on parameter type and endpoint configuration; consult the official documentation when a handler has more complex inputs.
+
+## What this example does not do
+
+The example keeps data only in a `List<Employee>`, so records disappear when the process stops. It also does not yet validate business rules, authorize users, or persist information. Those are separate concerns that will be introduced in later lessons.
+
+<Callout type="idea" title="Explore with requests">
+  Try `GET /employees`, then send a `POST /employees` with the JSON body above,
+  and request the new ID with `GET /employees/1`. Observe the status code and
+  response body for each request.
+</Callout>
+
+## Next
+
+- Continue to [Writing Your First API Tests](/docs/writing-api-tests) to verify endpoint behavior automatically.
+- Revisit [HTTP Overview and the Bridge to ASP.NET Core](/docs/http-overview) for request and response fundamentals.
+
+For more details, see Microsoft's [Minimal APIs overview](https://learn.microsoft.com/aspnet/core/fundamentals/minimal-apis).
