@@ -1,0 +1,205 @@
+---
+title: Validating API Requests
+description: Check incoming API data, return useful validation errors, and understand validation options in ASP.NET Core.
+---
+
+An API receives data from clients that it does not control. Data can be missing, malformed, or inconsistent with the application's rules. **Validation** checks that input is acceptable before the application uses it.
+
+Validation is not a replacement for correct types or database constraints. It is an early, understandable way to reject requests that should not continue.
+
+## Two kinds of validation
+
+It helps to distinguish two questions:
+
+1. **Is the request well-formed?** Is a required name present? Is the email string in an acceptable format? Is a number within a permitted range?
+2. **Is the requested operation allowed by the business?** Is the selected product still available? Does a unique identifier already belong to someone else? Is the account allowed to make this change?
+
+The first category is usually local to the request. The second may require database access or other services and is often called a business rule.
+
+An API should validate both where needed. A field marked required in the C# type does not automatically express every business rule.
+
+## Choose a validation response
+
+When a request is invalid, return a client error instead of processing it as if it were valid. `400 Bad Request` is commonly used for invalid request data.
+
+A response in the standard **validation problem details** format has a predictable shape:
+
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+  "title": "One or more validation errors occurred.",
+  "status": 400,
+  "errors": {
+    "firstName": ["The first name is required."]
+  }
+}
+```
+
+Clients can use the `errors` object to show a message next to the relevant field. Avoid returning stack traces, internal exception messages, database details, or sensitive values to the caller.
+
+## Built-in attributes
+
+C#'s `System.ComponentModel.DataAnnotations` namespace includes attributes that describe common constraints:
+
+```csharp
+using System.ComponentModel.DataAnnotations;
+
+public sealed class CreateEmployeeRequest
+{
+    [Required]
+    [StringLength(100, MinimumLength = 1)]
+    public string? FirstName { get; init; }
+
+    [Required]
+    [StringLength(100, MinimumLength = 1)]
+    public string? LastName { get; init; }
+
+    [EmailAddress]
+    public string? Email { get; init; }
+}
+```
+
+`[Required]` says a value must be present; `[StringLength]` limits a string's length; and `[EmailAddress]` checks an email-like format. The properties are nullable here because the incoming JSON may omit them, and the validation layer needs to report that as a request error rather than treating the C# declaration as proof that the client supplied a value.
+
+### Built-in validation depends on the API style and version
+
+Do not assume that attributes run automatically in every ASP.NET Core endpoint:
+
+- MVC controllers using `[ApiController]` integrate model validation with API responses. Invalid model state is automatically returned as a client error.
+- Minimal API validation behavior depends on the ASP.NET Core version and configured features. For example, newer versions provide built-in validation setup; earlier versions may require explicit validation code or another integration.
+- DataAnnotations do not automatically make arbitrary business rules asynchronous or perform database lookups.
+
+Check the documentation for the target framework. If validation behavior is important, verify it with an HTTP integration test that sends invalid JSON and checks the response.
+
+## Validate in a Minimal API handler
+
+For a small example, an endpoint can explicitly validate a request using DataAnnotations:
+
+```csharp
+using System.ComponentModel.DataAnnotations;
+
+app.MapPost("/employees", (CreateEmployeeRequest request) =>
+{
+    var errors = new List<ValidationResult>();
+    var isValid = Validator.TryValidateObject(
+        request,
+        new ValidationContext(request),
+        errors,
+        validateAllProperties: true);
+
+    if (!isValid)
+    {
+        var problemErrors = errors
+            .SelectMany(error => error.MemberNames.Select(member =>
+                (Member: member, Message: error.ErrorMessage ?? "Invalid value.")))
+            .GroupBy(error => error.Member)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(error => error.Message).ToArray());
+
+        return Results.ValidationProblem(problemErrors);
+    }
+
+    // Continue only after validation has succeeded.
+    return Results.Created("/employees/1", new { id = 1 });
+});
+```
+
+The handler gathers validation errors, groups messages by property, and returns a `400` response in validation problem details format. The success result is only a placeholder; a real handler would create and return a resource.
+
+Manual validation is explicit but can make handlers long when repeated across many endpoints. Consider a consistent shared approach as the application grows.
+
+## Use FluentValidation for richer rules
+
+FluentValidation is a library that keeps validation rules in validator classes. It can be useful when rules are more complex or require asynchronous work.
+
+Install its core and dependency-injection integration packages if the application needs them:
+
+```bash
+dotnet add package FluentValidation
+dotnet add package FluentValidation.DependencyInjectionExtensions
+```
+
+A validator might look like this:
+
+```csharp
+using FluentValidation;
+
+public sealed class CreateEmployeeRequestValidator
+    : AbstractValidator<CreateEmployeeRequest>
+{
+    public CreateEmployeeRequestValidator()
+    {
+        RuleFor(request => request.FirstName)
+            .NotEmpty()
+            .MaximumLength(100);
+
+        RuleFor(request => request.LastName)
+            .NotEmpty()
+            .MaximumLength(100);
+
+        RuleFor(request => request.Email)
+            .EmailAddress()
+            .When(request => !string.IsNullOrWhiteSpace(request.Email));
+    }
+}
+```
+
+Register validators with the application's service collection before `Build()`:
+
+```csharp
+builder.Services.AddValidatorsFromAssemblyContaining<CreateEmployeeRequestValidator>();
+```
+
+An endpoint can request its validator through DI and await it:
+
+```csharp
+app.MapPost("/employees", async (
+    CreateEmployeeRequest request,
+    IValidator<CreateEmployeeRequest> validator,
+    CancellationToken cancellationToken) =>
+{
+    var result = await validator.ValidateAsync(request, cancellationToken);
+
+    if (!result.IsValid)
+    {
+        var errors = result.Errors
+            .GroupBy(error => error.PropertyName)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(error => error.ErrorMessage).ToArray());
+
+        return Results.ValidationProblem(errors);
+    }
+
+    return Results.Created("/employees/1", new { id = 1 });
+});
+```
+
+Use `ValidateAsync` when a validator may contain asynchronous rules. Awaiting it keeps the request pipeline responsive while the validator waits on I/O, such as a database query. A unique-value check should also be enforced by the database where possible; checking in a validator alone can race when two requests arrive at the same time.
+
+FluentValidation does not automatically integrate with every ASP.NET Core endpoint style. Explicit invocation, filters, or a supported integration package may be needed. Avoid assuming that registering validators alone causes every request to be validated.
+
+## Test important validation outcomes
+
+Write tests for the contract clients depend on:
+
+- A missing required name returns `400 Bad Request`.
+- The response identifies the invalid field and explains the problem.
+- A valid request continues to the operation and returns the expected success status.
+- A duplicate or otherwise disallowed value returns the documented error.
+
+You do not need a separate test for every framework attribute in every request. Prioritize rules that protect important behavior, data integrity, and user experience. See [Writing Your First API Tests](/docs/writing-api-tests) for an integration-test example.
+
+<Callout type="idea" title="Validate at the boundary">
+  Reject invalid data before it reaches storage or another side effect. Keep the
+  error useful to a client, but do not disclose internal implementation details.
+</Callout>
+
+## What this section has established
+
+The API now has endpoints, tests, separate request and response types, a data-access boundary, and a validation strategy. Each concept solves a different problem; introduce abstractions when they make the code easier to understand, test, or change.
+
+## Next
+
+Continue to [What Is a Controller?](/docs/controllers) to see another way to organize related HTTP endpoints.

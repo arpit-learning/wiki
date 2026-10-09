@@ -1,0 +1,148 @@
+---
+title: Writing Your First API Tests
+description: Learn what automated tests do and use an HTTP client to check an ASP.NET Core API's real responses.
+---
+
+An API can compile and still return the wrong status code, data, or error. **Automated tests** send known inputs to code and check that the results match expectations. Once written, they can be run again whenever the application changes.
+
+## Why test an API?
+
+Tests provide quick feedback and help protect behavior during refactoring. A test also records an example of how a route is expected to behave.
+
+For example, a test can check that:
+
+- `GET /employees` returns `200 OK`.
+- `GET /employees/999` returns `404 Not Found` when that ID does not exist.
+- A valid `POST /employees` returns `201 Created`.
+- Invalid request data is rejected with a useful client error.
+
+A test does not prove that an application has no bugs. It proves that the behavior it checks worked under the conditions the test exercised.
+
+## Unit tests and API integration tests
+
+A **unit test** checks a small piece of logic, often one method, without starting the whole web application. It is useful for business rules that can be tested independently.
+
+An **integration test** checks how multiple pieces work together. An ASP.NET Core integration test can start the app in a test host, send it an HTTP request, and inspect the actual response. It does not need to open a network port or use Postman.
+
+For a beginner learning the HTTP contract, integration tests are useful because they use the same methods, routes, and response codes as a real client.
+
+## Create a test project
+
+From the directory that contains the API project, create an xUnit test project and reference the API:
+
+```bash
+dotnet new xunit -n EmployeeApi.Tests
+dotnet add EmployeeApi.Tests/EmployeeApi.Tests.csproj reference EmployeeApi/EmployeeApi.csproj
+dotnet add EmployeeApi.Tests/EmployeeApi.Tests.csproj package Microsoft.AspNetCore.Mvc.Testing
+```
+
+The `Microsoft.AspNetCore.Mvc.Testing` package supplies `WebApplicationFactory<TEntryPoint>`, which can create a test host for an ASP.NET Core application. Use a package version compatible with the target framework of the API project.
+
+With the minimal hosting model, make the generated `Program` type visible to the test assembly by adding this to the API's `Program.cs` after the top-level statements:
+
+```csharp
+public partial class Program { }
+```
+
+This is a testability hook; it does not add a route or change how requests are handled.
+
+## Write one integration test
+
+An xUnit test usually follows **Arrange, Act, Assert**:
+
+1. **Arrange:** Prepare the client and any input.
+2. **Act:** Send the request.
+3. **Assert:** Check the response.
+
+For the employee API with a `GET /employees` route:
+
+```csharp
+using System.Net;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Xunit;
+
+public sealed class EmployeeApiTests
+    : IClassFixture<WebApplicationFactory<Program>>
+{
+    private readonly HttpClient _client;
+
+    public EmployeeApiTests(WebApplicationFactory<Program> factory)
+    {
+        _client = factory.CreateClient();
+    }
+
+    [Fact]
+    public async Task GetEmployees_ReturnsOkAndAJsonArray()
+    {
+        var response = await _client.GetAsync("/employees");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/json",
+            response.Content.Headers.ContentType?.MediaType);
+    }
+}
+```
+
+`CreateClient()` sends requests to the app running inside the test host. `GetAsync` sends an HTTP `GET`; `StatusCode` lets the test check the exact status; and the content-type assertion checks that the response is JSON. This test does not assume the list has any particular employees.
+
+Run tests from the solution or test-project directory:
+
+```bash
+dotnet test
+```
+
+The CLI builds the project, discovers the test methods marked with `[Fact]`, runs them, and reports passed and failed tests. A failed assertion is a useful signal: compare the expected value with the actual response before changing code.
+
+## Assert the result you care about
+
+Checking only that a response is “successful” can hide a mistake. For example, `EnsureSuccessStatusCode()` accepts both `200 OK` and `201 Created`, but a test for creating a resource should generally verify the expected `201` response:
+
+```csharp
+using System.Net;
+using System.Net.Http.Json;
+
+[Fact]
+public async Task CreateEmployee_ReturnsCreatedAndLocation()
+{
+    var request = new
+    {
+        firstName = "Sample",
+        lastName = "Employee"
+    };
+
+    var response = await _client.PostAsJsonAsync("/employees", request);
+
+    Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    Assert.NotNull(response.Headers.Location);
+}
+```
+
+`PostAsJsonAsync` serializes the object as JSON and sets the request content type. The test checks the actual API contract: creation should return `201 Created` and a `Location` header identifying the new resource.
+
+Add focused tests for important behaviors, such as a missing ID returning `404` or invalid input returning `400`. Avoid writing so many brittle tests that harmless implementation changes become difficult. Test the outcomes clients rely on.
+
+## Keep tests independent
+
+Tests should not depend on running in a particular order. An API backed by a shared in-memory collection can keep data between requests in the same test host; creating an employee in one test may affect another test.
+
+For reliable tests:
+
+- Give each test known starting data, or configure a fresh application instance per test.
+- Do not depend on IDs being assigned in a particular order unless the test controls the initial state.
+- Avoid tests that pass only because another test ran first.
+- Check returned values and status codes, not just that no exception was thrown.
+
+When using `WebApplicationFactory`, application configuration can be customized for tests. As the project grows, use a predictable test data store or replace production data services with test implementations rather than relying on leftover state.
+
+<Callout type="idea" title="Start with behavior, not implementation">
+  Phrase a test in terms of a request and the response a client should receive.
+  This makes the test useful even if you later move code from a Minimal API
+  handler into a controller or service.
+</Callout>
+
+## Next
+
+- Learn why APIs often use separate request and response types in [Request Models and PUT](/docs/request-models-and-put).
+- Review the [HTTP methods and status codes](/docs/http-overview#http-methods) that API tests commonly assert.
+
+For more details, see Microsoft's guide to [ASP.NET Core integration tests](https://learn.microsoft.com/aspnet/core/test/integration-tests).

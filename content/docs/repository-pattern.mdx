@@ -1,0 +1,140 @@
+---
+title: The Repository Pattern
+description: Learn how a repository can separate API behavior from data storage, and when the abstraction is useful.
+---
+
+The first employee API can keep data in a `List<Employee>`. That is easy to understand, but the API handlers now know exactly where and how the data is stored.
+
+A **repository** is an object that provides an application with operations for retrieving and changing data. It creates a boundary between code that handles application behavior and code that talks to a data source.
+
+## Start from the in-memory list
+
+An endpoint might search a list directly:
+
+```csharp
+var employee = employees.SingleOrDefault(item => item.Id == id);
+```
+
+This is straightforward for a first lesson. As more endpoints are added, however, each one may start to contain search, update, and persistence details. Replacing the list with a database would require changing all those handlers.
+
+## Describe the operations behind an interface
+
+An **interface** is a C# declaration of operations a type promises to provide. It describes what callers can do without saying how those operations are implemented.
+
+```csharp
+public interface IEmployeeRepository
+{
+    Employee? GetById(int id);
+    IReadOnlyList<Employee> GetAll();
+    Employee Add(Employee employee);
+    bool Update(Employee employee);
+}
+```
+
+The endpoint can now depend on the interface:
+
+```csharp
+app.MapGet("/employees/{id:int}", (
+    int id,
+    IEmployeeRepository repository) =>
+{
+    var employee = repository.GetById(id);
+    if (employee is null)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Ok(employee);
+});
+```
+
+The endpoint asks for the employee; it does not need to know whether the data came from a list, a file, or a database.
+
+## Provide an implementation
+
+An **implementation** is a type that performs the work promised by an interface. A simple in-memory implementation could look like this:
+
+```csharp
+public sealed class InMemoryEmployeeRepository : IEmployeeRepository
+{
+    private readonly List<Employee> _employees = [];
+
+    public Employee? GetById(int id) =>
+        _employees.SingleOrDefault(employee => employee.Id == id);
+
+    public IReadOnlyList<Employee> GetAll() =>
+        _employees.AsReadOnly();
+
+    public Employee Add(Employee employee)
+    {
+        var nextId = _employees.Count == 0
+            ? 1
+            : _employees.Max(item => item.Id) + 1;
+
+        var stored = employee with { Id = nextId };
+        _employees.Add(stored);
+        return stored;
+    }
+
+    public bool Update(Employee employee)
+    {
+        var index = _employees.FindIndex(item => item.Id == employee.Id);
+        if (index < 0)
+        {
+            return false;
+        }
+
+        _employees[index] = employee;
+        return true;
+    }
+}
+
+public sealed record Employee(int Id, string FirstName, string LastName);
+```
+
+This implementation is intentionally limited. It loses data when the app stops, keeps all records in one process, and needs additional design for concurrency and production use. Its purpose is to demonstrate the interface boundary, not to provide a production data layer.
+
+## Let dependency injection connect them
+
+ASP.NET Core has a **dependency injection (DI) container**. DI is a way to provide a class or handler with the services it needs instead of having it construct every dependency itself.
+
+Register the mapping before building the app:
+
+```csharp
+builder.Services.AddSingleton<IEmployeeRepository, InMemoryEmployeeRepository>();
+var app = builder.Build();
+```
+
+This tells ASP.NET Core: when a handler requests `IEmployeeRepository`, provide an `InMemoryEmployeeRepository`.
+
+The lifetime matters:
+
+- A **singleton** is shared for the lifetime of the application.
+- A **scoped** service is created for a request scope.
+- A **transient** service is created each time it is requested.
+
+This sample uses a singleton so the list survives between requests in one running process. A mutable list shared by concurrent requests is not a production-ready storage solution. Database contexts commonly use a scoped lifetime; select a lifetime based on the service's design and thread-safety requirements.
+
+## Why make the boundary?
+
+An interface can make it easier to:
+
+- Change the data implementation without changing endpoint behavior.
+- Keep data-access code in one place.
+- Supply test data or a test implementation in tests.
+- Give the rest of the application a small, intentional set of data operations.
+
+It does not automatically make an application better. An abstraction with no useful boundary can add files and indirection without solving a real problem. For a tiny program, using a list directly may be the clearest choice. Introduce a repository when data access needs a clear home or when more than one part of the application benefits from the boundary.
+
+<Callout type="warning" title="An interface is not persistence">
+  Replacing a list with an interface does not save data. The in-memory
+  implementation still loses records when the process stops. Durable storage
+  requires a persistent data source and an implementation that uses it.
+</Callout>
+
+## Next
+
+- Use an `IEmployeeRepository` in a [request model and PUT handler](/docs/request-models-and-put).
+- Learn how to reject invalid request data in [Validating API Requests](/docs/api-validation).
+
+For more detail on service registration, see Microsoft's [dependency injection documentation](https://learn.microsoft.com/aspnet/core/fundamentals/dependency-injection).

@@ -1,0 +1,141 @@
+---
+title: Request Models and PUT
+description: Separate an API's request and response contracts from stored data, and understand what a PUT update means.
+---
+
+When an API receives JSON, ASP.NET Core needs to turn it into a C# value. When it responds, it turns a C# result into JSON. The types used for those exchanges are part of the API's **contract**: they define what clients may send and what clients can expect back.
+
+## Why not expose the stored entity directly?
+
+An **entity** is an application or data-access representation of something the system stores. It may contain fields used internally that clients should not send or see.
+
+Using the same type for storage, input, and output can create problems:
+
+- A client may be able to set fields that only the server should control, such as an ID or administrative flag.
+- Internal or sensitive fields could accidentally appear in a response.
+- A database change could unintentionally change the API contract.
+- Different operations often need different inputs. Creating a record and updating one are not always the same operation.
+
+Separate request and response models make each boundary explicit. They are sometimes called **DTOs** (Data Transfer Objects), because they carry data into or out of a system.
+
+## Define the shapes for each operation
+
+For a basic employee directory, the server might use one type for stored data and different types for API exchanges:
+
+```csharp
+public sealed class Employee
+{
+    public int Id { get; set; }
+    public required string FirstName { get; set; }
+    public required string LastName { get; set; }
+    public string? Email { get; set; }
+}
+
+public sealed record CreateEmployeeRequest(
+    string FirstName,
+    string LastName,
+    string? Email);
+
+public sealed record UpdateEmployeeRequest(
+    string FirstName,
+    string LastName,
+    string? Email);
+
+public sealed record EmployeeResponse(
+    int Id,
+    string FirstName,
+    string LastName,
+    string? Email);
+```
+
+In this example:
+
+- The server assigns `Employee.Id`; the client does not choose it.
+- The create and update request types describe data accepted from the client.
+- `EmployeeResponse` describes data the API is willing to return.
+- A sensitive field is intentionally not included in the response type.
+
+The fields above are illustrative. Real request types should reflect the actual operation, validation rules, and privacy requirements.
+
+## What does `PUT` mean?
+
+`PUT` asks the server to create or replace the state of a resource at a known address. For example, `PUT /employees/42` can mean “set employee 42 to the representation in this request.”
+
+An update request might look like this:
+
+```http
+PUT /employees/42 HTTP/1.1
+Content-Type: application/json
+
+{
+  "firstName": "Sample",
+  "lastName": "Employee",
+  "email": "sample@example.test"
+}
+```
+
+Because this is a full-replacement style example, the request includes all fields the operation expects. A field omitted from a `PUT` representation may be treated as absent or reset depending on the API's contract. Document that behavior clearly.
+
+If the operation is meant to change only a subset of fields, define that behavior explicitly—often with `PATCH` or a purpose-specific operation—instead of calling it a partial `PUT` without explanation.
+
+## Connect a route to an update request
+
+Here is a simplified Minimal API handler:
+
+```csharp
+app.MapPut("/employees/{id:int}", (
+    int id,
+    UpdateEmployeeRequest request,
+    IEmployeeRepository repository) =>
+{
+    var employee = repository.GetById(id);
+    if (employee is null)
+    {
+        return Results.NotFound();
+    }
+
+    employee.FirstName = request.FirstName;
+    employee.LastName = request.LastName;
+    employee.Email = request.Email;
+    repository.Update(employee);
+
+    return Results.Ok(new EmployeeResponse(
+        employee.Id,
+        employee.FirstName,
+        employee.LastName,
+        employee.Email));
+});
+```
+
+This handler:
+
+1. Reads `id` from the route.
+2. Reads the JSON body into `UpdateEmployeeRequest`.
+3. Looks up the existing employee.
+4. Returns `404 Not Found` if no employee has that ID.
+5. Applies the accepted fields and returns an `EmployeeResponse`.
+
+The code is illustrative; the repository interface is introduced in [The Repository Pattern](/docs/repository-pattern). A real endpoint also needs validation and appropriate persistence behavior.
+
+## Treat API contracts as deliberate boundaries
+
+When reviewing a request or response type, ask:
+
+- Which fields is the client allowed to set?
+- Which fields must the server assign or calculate?
+- Which data is safe and necessary to return?
+- What does an omitted or `null` field mean?
+- Does the type describe a create, update, or read operation?
+
+Do not return an entity simply because it is convenient. In particular, never return passwords, authentication tokens, private identifiers, or other data that a client does not need. The safest response model is the one that explicitly includes only the information the operation is meant to expose.
+
+<Callout type="idea" title="Keep the API stable as storage changes">
+  A database schema is an implementation detail; a public API is a contract with
+  its clients. Separate models let you change storage without accidentally
+  changing what clients send and receive.
+</Callout>
+
+## Next
+
+- See how an interface can separate endpoint code from stored data in [The Repository Pattern](/docs/repository-pattern).
+- Continue to [Validating API Requests](/docs/api-validation) to check request data before using it.
