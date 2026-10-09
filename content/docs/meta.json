@@ -13,10 +13,25 @@
     "request-models-and-put",
     "repository-pattern",
     "api-validation",
+    "designing-api-subresources",
     "---Controllers and the Request Pipeline---",
     "controllers",
     "converting-to-controllers",
+    "documenting-controllers-with-openapi",
     "logging",
-    "middleware-and-filters"
+    "middleware-and-filters",
+    "---EF Core and Data Persistence---",
+    "introduction-to-entity-framework-core",
+    "ienumerable-and-iqueryable",
+    "configuring-dbcontext-and-migrations",
+    "seeding-data-with-ef-core",
+    "querying-data-with-ef-core",
+    "adding-updating-and-deleting-data",
+    "modeling-data-with-ef-core",
+    "reviewing-ef-core-application",
+    "---Advanced ASP.NET Core Topics---",
+    "auditing-changes-with-ef-core",
+    "integration-testing-with-testcontainers",
+    "authentication-authorization-aspnet-core"
   ]
 }
