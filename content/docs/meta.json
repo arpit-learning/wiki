@@ -1,3 +1,22 @@
 {
-  "pages": ["index", "introduction", "tooling-overview", "http-overview", "test"]
+  "pages": [
+    "index",
+    "---Start Here---",
+    "introduction",
+    "tooling-overview",
+    "http-overview",
+    "---Minimal APIs---",
+    "what-well-build",
+    "minimal-apis",
+    "---Testing and API Design---",
+    "writing-api-tests",
+    "request-models-and-put",
+    "repository-pattern",
+    "api-validation",
+    "---Controllers and the Request Pipeline---",
+    "controllers",
+    "converting-to-controllers",
+    "logging",
+    "middleware-and-filters"
+  ]
 }
