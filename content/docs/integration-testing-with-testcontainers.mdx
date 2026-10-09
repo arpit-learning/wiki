@@ -1,0 +1,59 @@
+---
+title: Integration Testing with Testcontainers
+description: Compare EF Core test databases and run integration tests against an isolated instance of the production database engine.
+---
+
+An API may pass tests against one data store and behave differently against another. SQL translation, constraints, data types, transactions, and collation can vary by provider. **Testcontainers** is a .NET library that starts and manages containerized dependencies—such as a database—for the duration of an automated test.
+
+## Understand the database test options
+
+| Test database | What it gives you | Important limitation |
+| --- | --- | --- |
+| EF Core InMemory provider | A fast non-relational store for some simple tests | It does not behave like a relational database and does not test SQL, relational constraints, or provider behavior |
+| SQLite in-memory | A real relational database with fast startup | It is a different database engine from SQL Server, PostgreSQL, or another production provider |
+| Production database engine in a container | Provider-specific SQL, constraints, and migrations close to the production setup | Requires a container runtime and more startup time and resources |
+
+The EF Core InMemory provider is not a substitute for relational integration tests. It can still be useful for narrow tests that do not claim to validate database behavior. SQLite in-memory is a better fit when a relational store is needed, but differences from the production provider remain.
+
+For important persistence behavior, run tests with the same database engine and provider that the application uses in production. A separate provider does **not** always require a separate migration set; migrations are provider-specific, but one provider's migrations may work with another provider in simple cases. Test the actual migration path rather than assuming it is interchangeable.
+
+## What you need before running tests
+
+Testcontainers needs a supported container runtime, such as Docker Engine or Docker Desktop, running and accessible to the test process. The runtime must be able to start the database image, expose a temporary port, and clean up containers. CI runners need the same capability and enough resources to start the database.
+
+Add the Testcontainers integration module for the database you chose, along with the matching EF Core provider in the test project. For example, a PostgreSQL test needs the PostgreSQL EF Core provider and its corresponding Testcontainers module. Keep package versions compatible with the project and pin a database image version that matches the engine features you intend to test.
+
+## Give each test a predictable database
+
+A typical test fixture follows this lifecycle:
+
+1. Start a database container once for a test class or collection.
+2. Obtain its runtime connection details from the container; do not assume a fixed host port.
+3. Create an isolated database or schema for each test, or otherwise reset data between tests.
+4. Configure the test host's `DbContext` to use the container's connection and the intended provider.
+5. Apply the application's migrations and arrange the records required by the test.
+6. Send HTTP requests through `WebApplicationFactory` and assert the status, response, and relevant database effects.
+7. Dispose the database and container asynchronously, even when a test fails.
+
+The test fixture controls container startup and cleanup. The application test host should not independently start production database services or use a developer's local database. Tests must not depend on execution order or shared leftover rows; use a fresh database, transaction strategy, or reliable reset mechanism appropriate to the provider.
+
+<Callout type="warning" title="Containers are dependencies, not magic isolation">
+  Reusing one container can save time, but the tests still need isolated data.
+  A failure in one test should not change the records another test expects.
+  Avoid putting real credentials or personal data in test images, fixtures, or
+  logs.
+</Callout>
+
+## Match the application's provider and schema
+
+If production uses PostgreSQL, configure the test context with the PostgreSQL provider rather than SQLite and run the migration set used for that provider. This can catch differences that an alternate provider cannot. It still does not reproduce every part of production: server configuration, extensions, permissions, scale, and network behavior may differ.
+
+If a project deliberately supports multiple database providers, migrations or model configuration may need provider-specific handling. Keep that decision explicit and run the relevant migration and behavior tests for each supported provider. Do not create a second migration set automatically just because tests use containers.
+
+Testcontainers complements other tests rather than replacing them. Unit tests remain useful for pure application rules, and fast tests can cover behavior that does not require a database. Use container-backed tests where the database provider or full request pipeline is part of the behavior being verified.
+
+## Next
+
+- Review how database behavior is tested in [Writing Your First API Tests](/docs/writing-api-tests).
+- Learn how changes are attributed to an authenticated user in [Auditing Changes with EF Core](/docs/auditing-changes-with-ef-core).
+- Continue to [Authentication and Authorization in ASP.NET Core](/docs/authentication-authorization-aspnet-core) to protect API operations.

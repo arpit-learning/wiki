@@ -1,0 +1,105 @@
+---
+title: Authentication and Authorization in ASP.NET Core
+description: Understand identity, claims, roles, policies, bearer tokens, and security choices for ASP.NET Core APIs.
+---
+
+An API may need to know **who** is making a request and **what that caller may do**. ASP.NET Core separates these decisions into authentication and authorization:
+
+- **Authentication** verifies a caller's identity and creates a `ClaimsPrincipal` for the request.
+- **Authorization** decides whether that identity is allowed to perform a particular operation.
+
+Authentication answers “Who is this?” Authorization answers “May this identity do this here?” A signed-in user can still be forbidden from changing a particular employee.
+
+## Claims, roles, and policies
+
+A **claim** is a statement about an identity, such as a stable user identifier, tenant, role, or permission. The authentication handler creates the request principal from a validated credential; application code should not treat arbitrary request-body values as trusted claims.
+
+A **role** groups users for a broad kind of access, such as `Administrator`. A **policy** expresses an authorization rule the application can name and reuse. Policies can require authentication, a role, a claim, or a custom requirement. Prefer policies when an operation depends on permissions or several conditions rather than scattering role-name checks through controllers.
+
+For example, an API can configure bearer-token validation against an identity provider and require a permission claim for an update policy. Add the `Microsoft.AspNetCore.Authentication.JwtBearer` package when it is not already referenced, using a version compatible with the target framework:
+
+```csharp
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+
+var authority = builder.Configuration["Authentication:Authority"]
+    ?? throw new InvalidOperationException(
+        "Authentication:Authority is missing.");
+var audience = builder.Configuration["Authentication:Audience"]
+    ?? throw new InvalidOperationException(
+        "Authentication:Audience is missing.");
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.Authority = authority;
+        options.Audience = audience;
+    });
+
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("CanEditEmployees", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireClaim("permission", "employees.write");
+    });
+});
+```
+
+The authority and audience are configuration values, not secrets. The identity provider must issue the expected permission claim, and the API must validate the token using the issuer's trusted metadata and signing keys. Do not disable issuer, audience, signature, or lifetime validation to make a sample token work.
+
+Add the authentication and authorization middleware before mapping protected endpoints:
+
+```csharp
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapControllers();
+```
+
+Then protect an action or controller with the policy:
+
+```csharp
+using Microsoft.AspNetCore.Authorization;
+
+[Authorize(Policy = "CanEditEmployees")]
+```
+
+Place the attribute on the existing controller or action that should require the policy.
+
+An unauthenticated or invalid request commonly receives `401 Unauthorized`. A caller whose identity is valid but who does not satisfy the policy commonly receives `403 Forbidden`. Configure the API's challenge and forbid behavior consistently with its clients.
+
+## Understand bearer tokens and JWTs
+
+An **access token** is a credential presented to an API. A **JSON Web Token (JWT)** is one compact, URL-safe token format that can carry claims. A signed JWT commonly has three base64url-encoded sections—header, payload, and signature—separated by periods.
+
+The signature lets a validator detect tampering when it verifies the token with trusted keys. A signed JWT is **not encrypted by default**: anyone who obtains it can usually decode and read its header and payload. Do not place passwords, secrets, or unnecessary personal data in claims. Treat the whole token as a credential and avoid logging it.
+
+An API must validate more than the token's shape. Use a supported authentication handler and trusted issuer configuration to check the signature, issuer, intended audience, expiration, and other required claims. Decoding a token in a browser tool is useful for debugging its visible contents, but decoding alone does not prove that the token is valid.
+
+## Choose a credential flow for the client
+
+There is no single authentication mechanism for every application:
+
+- **First-party web application:** ASP.NET Core Identity with secure, `HttpOnly` cookies can be a good fit when the server manages sign-in and browser sessions. Because browsers attach cookies automatically, protect state-changing requests against cross-site request forgery and configure `Secure`, `SameSite`, expiration, and sign-out behavior carefully.
+- **Mobile, service-to-service, or separately deployed API clients:** OAuth 2.0 or OpenID Connect access tokens from a trusted identity provider are common. Use supported flows and keep token lifetime, refresh, storage, and revocation responsibilities explicit.
+- **Browser single-page application:** Use a standards-based authorization-code flow with PKCE and follow current browser-app guidance. A backend-for-frontend can keep access tokens on the server; if tokens are held by browser code, avoid long-lived credentials in JavaScript-readable storage and assess the XSS and CSRF trade-offs.
+- **Narrow machine integrations:** A scoped, revocable API key can sometimes be appropriate, but it is a bearer secret. Store it securely, support rotation, limit its permissions, and avoid exposing it in URLs or logs.
+
+Choose based on the client, deployment boundaries, and identity requirements. Prefer an established identity provider or framework-supported flow over writing a custom endpoint that issues tokens. Authentication is a larger system—including account lifecycle, recovery, MFA, key rotation, and monitoring—not just generating a JWT.
+
+## Apply least privilege and protect the full request path
+
+- Require authentication only where the API's contract needs it, and authorize each sensitive operation explicitly.
+- Prefer specific permission policies over granting broad administrator access to ordinary application actions.
+- Trust identity claims only after the configured authentication handler validates the credential.
+- Keep signing keys, client secrets, and API keys out of source control and logs.
+- Test both allowed and denied cases, including unauthenticated `401` and authenticated-but-forbidden `403` behavior.
+- Remember that CORS controls which browser origins may make certain requests; it is not authentication or authorization.
+
+For auditing, store a stable server-validated user identifier rather than a client-supplied actor name. See [Auditing Changes with EF Core](/docs/auditing-changes-with-ef-core).
+
+## Next
+
+- Learn about the [.NET authentication and authorization fundamentals](https://learn.microsoft.com/aspnet/core/security/).
+- Review API request behavior in [HTTP Overview and the Bridge to ASP.NET Core](/docs/http-overview).
+- Continue from [Reviewing the EF Core Application](/docs/reviewing-ef-core-application) for the data-model transition into these topics.

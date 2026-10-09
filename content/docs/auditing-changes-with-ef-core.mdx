@@ -1,0 +1,129 @@
+---
+title: Auditing Changes with EF Core
+description: Stamp entity changes with trusted actor and UTC time values, and make the behavior deterministic in tests.
+---
+
+Many applications need to know when a record was created or last changed, and sometimes which authenticated user made the change. These fields are often called **audit fields**. They help answer operational questions, but a pair of timestamps and user IDs is not the same as a complete, immutable audit history.
+
+## Add audit fields to the entity model
+
+A shared base class can hold fields used by several entities:
+
+```csharp
+public abstract class AuditableEntity
+{
+    public DateTimeOffset CreatedAt { get; set; }
+    public string? CreatedBy { get; set; }
+    public DateTimeOffset? LastModifiedAt { get; set; }
+    public string? LastModifiedBy { get; set; }
+}
+```
+
+Have an entity that needs auditing inherit from the base class, for example `Employee : AuditableEntity`. The nullable last-modified values indicate that an entity may not have been modified since it was created. Decide whether the creator can be unknown—for example, for a background import—and model that rule deliberately.
+
+Add a migration for the new columns, inspect its defaults and nullability, and plan how to populate fields for rows that already exist. Do not use a fake user or an unexplained timestamp merely to make a migration pass.
+
+## Set fields when the context saves
+
+EF Core's change tracker knows whether an entity is new or has been changed. A `DbContext` can use that state to set audit fields in one place instead of repeating the assignments in every controller:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+
+public sealed class AppDbContext : DbContext
+{
+    private readonly TimeProvider _timeProvider;
+    private readonly ICurrentActor _currentActor;
+
+    public AppDbContext(
+        DbContextOptions<AppDbContext> options,
+        TimeProvider timeProvider,
+        ICurrentActor currentActor)
+        : base(options)
+    {
+        _timeProvider = timeProvider;
+        _currentActor = currentActor;
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        ApplyAuditFields();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        ApplyAuditFields();
+        return base.SaveChangesAsync(
+            acceptAllChangesOnSuccess,
+            cancellationToken);
+    }
+
+    private void ApplyAuditFields()
+    {
+        var now = _timeProvider.GetUtcNow();
+        var actorId = _currentActor.UserId;
+
+        foreach (var entry in ChangeTracker.Entries<AuditableEntity>())
+        {
+            if (entry.State == EntityState.Added)
+            {
+                entry.Entity.CreatedAt = now;
+                entry.Entity.CreatedBy = actorId;
+                entry.Entity.LastModifiedAt = now;
+                entry.Entity.LastModifiedBy = actorId;
+            }
+            else if (entry.State == EntityState.Modified)
+            {
+                entry.Entity.LastModifiedAt = now;
+                entry.Entity.LastModifiedBy = actorId;
+                entry.Property(entity => entity.CreatedAt).IsModified = false;
+                entry.Property(entity => entity.CreatedBy).IsModified = false;
+            }
+        }
+    }
+}
+```
+
+The change tracker includes entities added to or loaded by this context. New entities receive their creation fields; modified entities receive new last-modified fields. The original creation fields are marked as not modified so an update cannot replace them accidentally.
+
+This example overrides the `SaveChanges(bool)` and `SaveChangesAsync(bool, CancellationToken)` overloads, which are used by the usual convenience calls. If the application uses a different save path, ensure that it also runs the audit logic. Operations such as `ExecuteUpdate`, raw SQL, or writes made by another service bypass this change-tracker hook.
+
+## Use a trusted actor and an injectable clock
+
+The client should not submit `CreatedBy`, `LastModifiedBy`, or the audit timestamps in an ordinary request model. A client could change those values. Instead, obtain the actor from a server-side abstraction backed by the authenticated principal:
+
+```csharp
+public interface ICurrentActor
+{
+    string? UserId { get; }
+}
+```
+
+An ASP.NET Core implementation can read a stable user identifier from `HttpContext.User` after authentication has validated the identity. Map the identity provider's trusted subject or internal user ID to this abstraction; do not trust a name, role, or actor ID copied from the request body. For anonymous operations and background jobs, define whether the actor is null or a specific system identity.
+
+Use `TimeProvider` instead of calling `DateTime.UtcNow` throughout the code. Register the system clock and the current-actor service with dependency injection:
+
+```csharp
+builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentActor, HttpCurrentActor>();
+```
+
+`HttpCurrentActor` is the application's adapter that reads the authenticated request identity; its implementation and claim mapping depend on the authentication setup. The context remains scoped, while `TimeProvider.System` is safe to share.
+
+In a test, replace `TimeProvider.System` with `FakeTimeProvider` from the `Microsoft.Extensions.TimeProvider.Testing` package and set a known UTC instant. Then save an entity and assert its audit timestamp equals that instant. A fake actor service can similarly provide a known test user ID. This makes tests deterministic without waiting for the system clock or depending on the machine's timezone.
+
+## Know what these fields do not capture
+
+Audit columns on the current entity tell you its creator and most recent modifier. They do not preserve every previous value, identify every change to a relationship, or prevent a privileged database user from editing the fields. Compliance or security requirements may call for an append-only audit table or event stream with stricter access, retention, and tamper controls.
+
+Also consider all writers to the database. `SaveChanges` overrides cover normal tracked saves through this context; bulk operations and external tools may need a separate audit mechanism. Choose the mechanism based on the evidence the application must retain.
+
+## Next
+
+- The next section uses an isolated database for realistic tests in [Integration Testing with Testcontainers](/docs/integration-testing-with-testcontainers).
+- Learn how authenticated identities are validated and authorized in [Authentication and Authorization in ASP.NET Core](/docs/authentication-authorization-aspnet-core).
+- Review how entity changes are tracked in [Adding, Updating, and Deleting Data](/docs/adding-updating-and-deleting-data).
