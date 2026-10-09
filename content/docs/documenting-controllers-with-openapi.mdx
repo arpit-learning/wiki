@@ -1,0 +1,161 @@
+---
+title: Documenting Controllers with OpenAPI
+description: Describe controller routes, inputs, and responses so API clients can understand the contract before they send a request.
+---
+
+An API is easier to use when its routes and responses are described clearly. ASP.NET Core can produce an **OpenAPI document** from information in your controllers and their attributes. That document is a machine-readable description of an API: it lists routes, HTTP methods, parameters, request bodies, response codes, and data shapes.
+
+An OpenAPI document is not the same thing as a web page for browsing the API. Tools such as Swagger UI or Scalar can read an OpenAPI document and display it as an interactive page. Think of the document as the description and the UI as one way to explore that description.
+
+## What information does OpenAPI need?
+
+The framework and its OpenAPI integration can infer some facts from a controller, such as its route and HTTP method. Add metadata when it makes the contract more precise:
+
+| Information | Example | Why it helps |
+| --- | --- | --- |
+| Summary and description | “Gets an employee by ID” | Explains an operation in plain language |
+| Tags | `Employees` | Groups related operations in a documentation tool |
+| Request data | A JSON `CreateEmployeeRequest` body | Shows what a client can send |
+| Response type | `EmployeeResponse` | Shows the shape of successful data |
+| Response codes | `200 OK`, `404 Not Found` | Shows the outcomes a client should handle |
+
+Document the behavior the endpoint actually has. Do not list `500 Internal Server Error` on every action just because a server failure is possible; describe intentional and useful parts of the endpoint's contract.
+
+## Register an OpenAPI integration
+
+Recent ASP.NET Core templates can use the built-in `Microsoft.AspNetCore.OpenApi` integration. In a project that targets a compatible framework version, register controller routing and OpenAPI generation, then map both:
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddControllers();
+builder.Services.AddOpenApi();
+
+var app = builder.Build();
+app.MapControllers();
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+app.Run();
+```
+
+`AddOpenApi` registers document generation and `MapOpenApi` exposes the generated document, commonly at `/openapi/v1.json`. This integration does not include an interactive UI by itself. If you use a different target framework or project template, follow that version's setup instructions.
+
+Swashbuckle is another common integration. It is installed as a separate package and typically uses `AddSwaggerGen` to configure generation, then `UseSwagger` and `UseSwaggerUI` to serve the document and UI. Do not mix setup from different integrations without a reason.
+
+## Describe a controller action
+
+This example documents a read operation. The response model contains only the fields the API intends to return:
+
+```csharp
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+
+public sealed record EmployeeResponse(
+    int Id,
+    string FirstName,
+    string LastName);
+
+[ApiController]
+[Route("employees")]
+public sealed class EmployeesController : ControllerBase
+{
+    private readonly IEmployeeRepository _repository;
+
+    public EmployeesController(IEmployeeRepository repository)
+    {
+        _repository = repository;
+    }
+
+    /// <summary>Gets an employee by ID.</summary>
+    /// <param name="id">The ID from the route.</param>
+    /// <response code="200">Returns the matching employee.</response>
+    /// <response code="404">No employee has that ID.</response>
+    [HttpGet("{id:int}")]
+    [Tags(["Employees"])]
+    [ProducesResponseType(
+        typeof(EmployeeResponse),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult<EmployeeResponse> GetById(int id)
+    {
+        var employee = _repository.GetById(id);
+        if (employee is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(new EmployeeResponse(
+            employee.Id,
+            employee.FirstName,
+            employee.LastName));
+    }
+}
+```
+
+The route attribute says this action handles `GET /employees/{id}`. The `:int` constraint means the route only matches an integer value for `id`. `ProducesResponseType` declares response metadata: here the operation can return an employee with `200 OK`, or `404 Not Found` when there is no match.
+
+The XML documentation comments add human-readable descriptions. The `<summary>` describes the operation, `<param>` describes a parameter, and `<response>` describes a response. The response metadata and the response comment have different jobs: declaring a response status makes it part of the API contract; the XML comment explains that response.
+
+`[Tags(["Employees"])]` groups the operation under an `Employees` tag in OpenAPI-aware tools. This attribute and its collection-expression syntax depend on the ASP.NET Core and C# versions in the project. Some versions use the controller name as the default tag. If the example does not compile in your project, check the documentation for its target version and use the supported syntax or the generator's configuration instead.
+
+`[ApiController]` enables API-specific controller conventions and helps ASP.NET Core discover metadata.
+
+## Include XML comments in the generated document
+
+The C# compiler can write XML documentation comments to a file when the project enables documentation-file generation:
+
+```xml
+<PropertyGroup>
+  <GenerateDocumentationFile>true</GenerateDocumentationFile>
+</PropertyGroup>
+```
+
+Generating this file can also surface warnings for public members that do not have XML comments, depending on the project's compiler settings. Add useful documentation where it is required by the project. Avoid globally disabling the warning simply to hide missing documentation.
+
+How the OpenAPI generator reads the file depends on the framework and packages in the project:
+
+- ASP.NET Core's built-in OpenAPI support in current versions can include XML documentation comments from the generated file.
+- Swashbuckle is a separate package-based integration. Projects using it commonly configure `AddSwaggerGen` to read the generated XML file.
+- A generated OpenAPI document does not automatically include an interactive UI. Add a compatible UI package if the course project needs one.
+
+For example, a project using Swashbuckle can opt into its XML-comment integration like this:
+
+```csharp
+builder.Services.AddSwaggerGen(options =>
+{
+    var xmlFile = $"{typeof(Program).Assembly.GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+    options.IncludeXmlComments(xmlPath);
+});
+```
+
+This snippet is specific to Swashbuckle. The project also needs to generate the matching XML file, and the file name is based on the assembly name. Do not add `AddSwaggerGen` to a project that uses only the built-in OpenAPI integration unless the Swashbuckle package has also been installed.
+
+Some framework versions can collect controller metadata such as summaries, descriptions, response types, and tags through built-in OpenAPI support. Current built-in support can read generated XML documentation as part of the OpenAPI document. Other projects use a package to generate the document. The project template, target framework, and installed packages determine which setup applies. For example, do not combine `AddOpenApi` and `AddSwaggerGen` simply because both appear in different tutorials; first identify which integration the project uses.
+
+## Keep the generated contract accurate
+
+OpenAPI helps people and tools understand an API, but it does not implement the behavior for you. For example, adding `404` metadata does not make an action return `404`; the action must still check for a missing record and return the correct result.
+
+For a controller action, `[ProducesResponseType]` declares a possible HTTP status and, when needed, its response type. An XML `<response>` comment adds a description to a response that is already declared; it does not necessarily add a missing status code by itself.
+
+Use these checks while documenting an endpoint:
+
+1. Confirm that the route and HTTP method match the action.
+2. List the response codes the action can really produce.
+3. Use request and response models that represent the public API contract.
+4. Keep descriptions specific enough to help a client choose what to send and how to handle the result.
+5. Review the generated document after changing an action or its models.
+
+Avoid including private implementation details, credentials, tokens, or personal identifiers in descriptions or example values. An OpenAPI document can itself reveal routes and data shapes, so decide which environments should serve it.
+
+## Next
+
+- See how controller actions keep the API contract separate from stored data in [Request Models and PUT](/docs/request-models-and-put).
+- Review the [HTTP methods and status codes](/docs/http-overview#http-methods) used in the examples.
+- Continue to [Logging in ASP.NET Core](/docs/logging) after the controller and API-design lessons.
+
+For details on the built-in integration, see Microsoft's guides to [including OpenAPI metadata](https://learn.microsoft.com/aspnet/core/fundamentals/openapi/include-metadata) and [XML documentation comments](https://learn.microsoft.com/aspnet/core/fundamentals/openapi/openapi-comments).

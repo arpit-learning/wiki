@@ -1,0 +1,192 @@
+---
+title: Designing API Sub-Resources
+description: Choose when related data belongs in a parent response and when it is easier to query through its own route.
+---
+
+An API **resource** is something a client can work with through HTTP, such as an employee. Related data can be modeled as a **sub-resource** when it belongs to a parent resource. For example, an employee might have benefit selections, projects, or certifications.
+
+There is no single route shape that fits every relationship. Two common designs are to include a small collection in the parent response or to give the collection its own endpoint.
+
+## Option 1: Include a small collection with the parent
+
+If clients usually need a small set of related values whenever they read the parent, returning both together can be convenient:
+
+```http
+GET /employees/42 HTTP/1.1
+```
+
+```json
+{
+  "id": 42,
+  "firstName": "Sample",
+  "lastName": "Employee",
+  "benefits": [
+    {
+      "id": 7,
+      "type": "Health",
+      "monthlyCost": 85.00
+    },
+    {
+      "id": 8,
+      "type": "Dental",
+      "monthlyCost": 18.50
+    }
+  ]
+}
+```
+
+The JSON is a response model: a deliberate description of what the API returns. It does not have to match the database entity or include every field stored by the server.
+
+This design can be a good fit when the collection is predictably small and clients commonly display it with the parent. Consider how the response will grow, whether the related values have their own lifecycle, and whether callers need to filter or page through them. Returning every related row for every request can make the response slow or unnecessarily large.
+
+## Option 2: Give the collection its own route
+
+When the related collection can grow or clients need it independently, a separate endpoint lets the API return just that data:
+
+```http
+GET /employees/42/benefits HTTP/1.1
+```
+
+The route reads as “the benefits that belong to employee 42.” It does not require the database to use the same shape; the route is part of the API's public contract.
+
+A response could contain a list of benefit response models:
+
+```json
+[
+  {
+    "id": 7,
+    "type": "Health",
+    "monthlyCost": 85.00
+  },
+  {
+    "id": 8,
+    "type": "Dental",
+    "monthlyCost": 18.50
+  }
+]
+```
+
+An entity can hold a collection that represents the relationship in the application model. For example, add a benefits collection to the existing `Employee` type:
+
+```csharp
+public sealed class EmployeeBenefit
+{
+    public int Id { get; set; }
+    public string Type { get; set; } = string.Empty;
+    public decimal MonthlyCost { get; set; }
+}
+
+public sealed class Employee
+{
+    public int Id { get; set; }
+    public List<EmployeeBenefit> Benefits { get; set; } = new();
+}
+```
+
+In a real course project, add the collection to the existing `Employee` class rather than replacing that class. The model and API response are separate: the endpoint can map an `EmployeeBenefit` to the smaller `BenefitResponse` shown below.
+
+For a controller whose class route is `[Route("employees")]`, the action route can be written as `"{employeeId:int}/benefits"`. Combined, they match `/employees/42/benefits`:
+
+```csharp
+using System.Collections.Generic;
+using System.Linq;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+
+public sealed record BenefitResponse(
+    int Id,
+    string Type,
+    decimal MonthlyCost);
+
+[ApiController]
+[Route("employees")]
+public sealed class EmployeesController : ControllerBase
+{
+    private readonly IEmployeeRepository _repository;
+
+    public EmployeesController(IEmployeeRepository repository)
+    {
+        _repository = repository;
+    }
+
+    [HttpGet("{employeeId:int}/benefits")]
+    [ProducesResponseType(
+        typeof(IReadOnlyList<BenefitResponse>),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult<IReadOnlyList<BenefitResponse>> GetBenefits(
+        [FromRoute] int employeeId)
+    {
+        var employee = _repository.GetById(employeeId);
+        if (employee is null)
+        {
+            return NotFound();
+        }
+
+        var response = employee.Benefits
+            .Select(benefit => new BenefitResponse(
+                benefit.Id,
+                benefit.Type,
+                benefit.MonthlyCost))
+            .ToArray();
+
+        return Ok(response);
+    }
+}
+```
+
+This controller assumes the `IEmployeeRepository` introduced in the earlier data-access lesson. It returns `404 Not Found` when the parent is missing; if the parent exists but has no benefits, it returns `200 OK` with an empty array. The route design itself does not depend on whether the repository uses an in-memory collection or a database.
+
+Decide and document what happens in these cases:
+
+- **The parent employee does not exist:** returning `404 Not Found` is a common choice for a nested route because the requested collection has no parent.
+- **The employee exists but has no benefits:** returning `200 OK` with an empty array (`[]`) is usually clearer than treating an empty collection as missing.
+- **The collection is large:** add query parameters for filtering or pagination, and return a stable ordering so clients can request later pages reliably.
+- **The related item changes independently:** decide whether create, update, and delete operations belong on the nested route or on a route for the item itself.
+
+These are API-contract decisions, not automatic consequences of using nested routes.
+
+## Compare the designs
+
+| Question | Include the collection with the parent | Query the collection separately |
+| --- | --- | --- |
+| Do callers usually need the related values with the parent? | Often convenient | Requires another request |
+| Can the collection grow or need pagination? | May make the parent response too large | Can be filtered and paged independently |
+| Does the related data change on its own? | Can couple updates to the parent | Can give it an independent lifecycle |
+| Do different callers need different fields? | May return more than some callers need | Can tailor the response to that operation |
+
+You can also combine the approaches. A parent endpoint may return a short summary or count, while a separate endpoint returns the full collection. Choose based on how clients use the data, the collection's size, and the complexity you are willing to maintain.
+
+## Test the public behavior
+
+An integration test should send an HTTP request and check the response a client actually receives. For `GET /employees/42/benefits`, useful cases include:
+
+1. The parent exists and has benefits: expect `200 OK` and the documented list shape.
+2. The parent exists with no benefits: expect `200 OK` and an empty JSON array if that is the chosen contract.
+3. The parent does not exist: expect the documented not-found response.
+4. A benefit response contains only the fields the API intends to expose.
+
+For the success case, arrange an employee with two benefits in the test's own data store, send the request, then assert the exact status and result:
+
+```csharp
+using System.Collections.Generic;
+using System.Net;
+using System.Net.Http.Json;
+using Xunit;
+
+var response = await _client.GetAsync("/employees/42/benefits");
+
+Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+var benefits =
+    await response.Content.ReadFromJsonAsync<List<BenefitResponse>>();
+Assert.NotNull(benefits);
+Assert.Equal(2, benefits.Count);
+```
+
+This is the Act and Assert part of the test; the test setup must create employee `42` with two benefits before the request. Tests should create their own known starting data instead of relying on another test to run first. See [Writing Your First API Tests](/docs/writing-api-tests) for the test-host setup.
+
+## Next
+
+- Review separate request and response shapes in [Request Models and PUT](/docs/request-models-and-put).
+- Learn how the endpoint's response is described to API clients in [Documenting Controllers with OpenAPI](/docs/documenting-controllers-with-openapi).
+- Continue to [The Repository Pattern](/docs/repository-pattern) for ways to organize data access.
