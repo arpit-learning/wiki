@@ -1,0 +1,56 @@
+---
+title: Reviewing the EF Core Application
+description: Recap the move from in-memory storage to EF Core and prepare for auditing, database-backed tests, and application security.
+---
+
+This page brings the data lessons together before the course moves into more advanced ASP.NET Core topics. The goal is not to memorize every EF Core API. It is to understand where each responsibility belongs and what to check when the application changes.
+
+## How the data flow evolved
+
+The early API stored employees in an in-memory collection. That was useful for learning routes and HTTP responses, but the data disappeared when the process stopped. EF Core introduced a provider, a `DbContext`, and entity sets so API operations could query a persistent database.
+
+The high-level flow is now:
+
+1. A request model describes what a client is allowed to send.
+2. The controller or application service validates the request and decides which operation to perform.
+3. The `DbContext` queries or changes tracked entities.
+4. `SaveChangesAsync` persists pending changes.
+5. A response model exposes only the data the API intends to return.
+
+The database entity and HTTP request or response are separate models with different responsibilities. Do not automatically serialize an entity graph or bind a request directly to a database entity; map deliberately at the API boundary.
+
+## Query with the database in mind
+
+Build filters, ordering, projections, and pagination on the `IQueryable<T>` query before materializing it. This lets the provider translate supported operations and return only the requested page or fields. Validate client-supplied page values, use a stable sort that includes a unique key, and avoid loading large related collections unless the response needs them.
+
+Use tracking when a loaded entity will be changed and saved. For read-only results, consider `AsNoTracking` or a projection to a response model. Provider capabilities differ, so review generated SQL and test important queries against the database the application actually uses.
+
+## The benefit model changed as requirements grew
+
+The first sub-resource example attached a small list of benefit values directly to an employee. As the model became more realistic, a benefit became its own entity and `EmployeeBenefit` became a join entity between employees and benefits. The join can store information about one specific selection, such as an optional employee-specific cost.
+
+The public `GET /employees/{id}/benefits` contract can remain stable while its implementation maps the join entity through `EmployeeBenefit.Benefit` and chooses the employee-specific cost or the benefit's base cost. That keeps API responses separate from the evolving database shape.
+
+That evolution illustrates a general design lesson: begin with the simplest model that explains the current requirement, then change it when the domain needs more. When a model change affects a database, generate and review a migration, preserve important data, and make a deployment plan; do not assume a schema change is harmless because the C# code compiles.
+
+## Keep the data layer understandable
+
+`DbContext` already provides query and unit-of-work behavior. It can be injected directly for straightforward operations. A repository is useful when it gives the application a meaningful boundary or owns a domain-specific query; a wrapper that repeats each context method may add little value. The right choice depends on the application's needs, not a universal rule.
+
+Before changing a data operation, ask:
+
+- Does the API validate client input and return the documented status for a missing record?
+- Does the query fetch only the data the caller needs?
+- Is the context lifetime scoped to a unit of work and not shared concurrently?
+- Does the migration preserve the data and constraints the application relies on?
+- Are tests using isolated, predictable starting data?
+
+## Continue into advanced topics
+
+The next guides build on these foundations:
+
+- [Auditing Changes with EF Core](/docs/auditing-changes-with-ef-core) explores how to record who changed data and when.
+- [Integration Testing with Testcontainers](/docs/integration-testing-with-testcontainers) shows how to test against an isolated database service.
+- [Authentication and Authorization in ASP.NET Core](/docs/authentication-authorization-aspnet-core) covers identity, access, and protecting API operations.
+
+These topics connect persistence to the responsibilities of a production API: traceable changes, realistic tests, and carefully controlled access.

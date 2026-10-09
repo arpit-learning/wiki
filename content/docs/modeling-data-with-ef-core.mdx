@@ -1,0 +1,135 @@
+---
+title: Modeling Data with EF Core
+description: Model entity relationships, keys, navigation properties, constraints, indexes, and deliberate schema changes with EF Core.
+---
+
+An EF Core **model** describes the entity types an application stores and how those types relate. The model is expressed with C# classes and configuration; a database provider maps it to tables, columns, keys, and constraints. Good modeling starts with the rules of the data, not with a table shape chosen only because a tool can generate it.
+
+## Start with entities and keys
+
+An **entity** represents a type of data the application stores. A property named `Id` is commonly recognized as its primary key, which uniquely identifies each row. Foreign-key properties connect one entity to another.
+
+The `Employee` model already used by the API can be extended to hold its benefit selections. The collection is a **navigation property**: it lets application code move from an employee to the related records:
+
+```csharp
+using System.Collections.Generic;
+
+public sealed class Employee
+{
+    public int Id { get; set; }
+    public required string FirstName { get; set; }
+    public required string LastName { get; set; }
+    public string? Email { get; set; }
+
+    public ICollection<EmployeeBenefit> Benefits { get; set; } =
+        new List<EmployeeBenefit>();
+}
+```
+
+An `Employee` can have many related benefit selections. Each selection belongs to one employee, so this side of the relationship is **one-to-many**. A navigation property is an application-level connection; EF Core still needs the model to define how that connection maps to keys in the database.
+
+## Model a many-to-many relationship with a join entity
+
+Employees may each select multiple benefits, and each benefit may be selected by multiple employees. This is a **many-to-many** relationship. A simple many-to-many relationship can use an implicit join table, but this course needs extra data about the pairing—such as an employee-specific cost—so model the joining row explicitly:
+
+```csharp
+public sealed class Benefit
+{
+    public int Id { get; set; }
+    public required string Name { get; set; }
+    public required string Description { get; set; }
+    public decimal BaseCost { get; set; }
+
+    public ICollection<EmployeeBenefit> EmployeeBenefits { get; set; } =
+        new List<EmployeeBenefit>();
+}
+
+public sealed class EmployeeBenefit
+{
+    public int Id { get; set; }
+
+    public int EmployeeId { get; set; }
+    public Employee Employee { get; set; } = null!;
+
+    public int BenefitId { get; set; }
+    public Benefit Benefit { get; set; } = null!;
+
+    public decimal? CostToEmployee { get; set; }
+}
+```
+
+`EmployeeBenefit` is the **join entity**. Each row links one employee to one benefit through `EmployeeId` and `BenefitId`. `CostToEmployee` belongs on the join entity because it describes this employee's selection, not the benefit for every employee. In this example, a `null` override means the application can use `Benefit.BaseCost`; define that rule explicitly in the API and business logic.
+
+The `= null!` initializers on the navigation properties suppress nullable-reference warnings for properties EF Core populates when it materializes or connects related entities. The non-nullable foreign-key properties still make each relationship required; `null!` does not make the database relationship optional.
+
+The join has its own `Id` key. A unique index on the pair of foreign keys prevents the same employee from selecting the same benefit twice:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+
+protected override void OnModelCreating(ModelBuilder modelBuilder)
+{
+    base.OnModelCreating(modelBuilder);
+
+    modelBuilder.Entity<EmployeeBenefit>()
+        .HasIndex(selection => new
+        {
+            selection.EmployeeId,
+            selection.BenefitId
+        })
+        .IsUnique();
+
+    modelBuilder.Entity<EmployeeBenefit>()
+        .Property(selection => selection.CostToEmployee)
+        .HasPrecision(10, 2);
+}
+```
+
+The unique index enforces a data rule in the database, even if two requests arrive at nearly the same time. An alternative is a composite primary key on `(EmployeeId, BenefitId)`; keeping a separate `Id` can be useful when the join row has its own lifecycle or is referenced elsewhere. Choose one key design and preserve the uniqueness rule either way.
+
+`HasPrecision(10, 2)` expresses the intended precision for a decimal cost. Enforcement and storage details depend on the provider—SQLite, for example, does not enforce decimal precision the same way as SQL Server—so validate important values in the application and test against the database used in deployment.
+
+## Relationships, constraints, and navigation properties
+
+EF Core can infer many relationships from names such as `EmployeeId`, `BenefitId`, and matching navigation properties. When the relationship is important to understand, explicit configuration makes the foreign keys visible:
+
+```csharp
+modelBuilder.Entity<Employee>()
+    .HasMany(employee => employee.Benefits)
+    .WithOne(selection => selection.Employee)
+    .HasForeignKey(selection => selection.EmployeeId);
+
+modelBuilder.Entity<Benefit>()
+    .HasMany(benefit => benefit.EmployeeBenefits)
+    .WithOne(selection => selection.Benefit)
+    .HasForeignKey(selection => selection.BenefitId);
+```
+
+Add the entity sets to `AppDbContext` so the application has clear query entry points:
+
+```csharp
+public DbSet<Employee> Employees => Set<Employee>();
+public DbSet<Benefit> Benefits => Set<Benefit>();
+public DbSet<EmployeeBenefit> EmployeeBenefits => Set<EmployeeBenefit>();
+```
+
+Foreign keys prevent a join row from pointing to an employee or benefit that does not exist. The required, non-nullable foreign-key properties make each join refer to both related rows. Decide deliberately what should happen when a related employee or benefit is deleted; cascade and restrict behaviors affect real data and should match the application's rules.
+
+Other common model rules include required values, maximum string lengths, unique values, and check constraints. Use C# nullability and validation to describe what the application accepts, and use database constraints to protect durable data from every writer—not just the API. Add indexes for query and uniqueness needs, not on every column: indexes take storage and can slow writes.
+
+## Change the model and review the migration
+
+Earlier in the course, `EmployeeBenefit` was a simpler object directly associated with an employee. The new design promotes benefits to their own entity and uses the join entity to represent each selection. This changes the stored model; it is not only a C# refactor.
+
+After changing the model, create a migration and inspect the generated operations:
+
+```bash
+dotnet ef migrations add ModelBenefits
+```
+
+Do not assume that dropping the old table and creating new tables preserves existing selections. If the database has data that matters, plan how to copy or transform it, test the migration against a representative database, and coordinate any intermediate application versions. See [Configuring a DbContext and Migrations](/docs/configuring-dbcontext-and-migrations) for the migration workflow and deployment cautions.
+
+## Next
+
+- Use the related data in [Querying Data with EF Core](/docs/querying-data-with-ef-core) and [Designing API Sub-Resources](/docs/designing-api-subresources).
+- Review how the API and data model fit together in [Reviewing the EF Core Application](/docs/reviewing-ef-core-application).
