@@ -2,6 +2,7 @@
 import { Check, Clipboard } from 'lucide-react';
 import {
   type ComponentProps,
+  type CSSProperties,
   createContext,
   type HTMLAttributes,
   type ReactNode,
@@ -79,7 +80,7 @@ export function CodeBlock({
   children,
   Actions = (props) => <div {...props} className={cn('empty:hidden', props.className)} />,
   ...props
-}: CodeBlockProps) {
+}: Readonly<CodeBlockProps>) {
   const inTab = use(TabsContext) !== null;
   const areaRef = useRef<HTMLDivElement>(null);
   if (allowCopy === 'true') allowCopy = true;
@@ -123,10 +124,10 @@ export function CodeBlock({
           children: allowCopy && <CopyButton containerRef={areaRef} />,
         })
       )}
-      <div
+      <section
         ref={areaRef}
         {...viewportProps}
-        role="region"
+        aria-label="Code block"
         tabIndex={0}
         className={cn(
           'text-[0.8125rem] py-3.5 overflow-auto max-h-[600px] fd-scroll-container focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-fd-ring',
@@ -139,10 +140,10 @@ export function CodeBlock({
             ? `line ${Number(props['data-line-numbers-start'] ?? 1) - 1}`
             : undefined,
           ...viewportProps.style,
-        }}
+        } as CSSProperties}
       >
         {children}
-      </div>
+      </section>
     </figure>
   );
 }
@@ -192,7 +193,7 @@ function CopyButton({
   );
 }
 
-export function CodeBlockTabs({ ref, className, ...props }: ComponentProps<typeof Tabs>) {
+export function CodeBlockTabs({ ref, className, ...props }: Readonly<ComponentProps<typeof Tabs>>) {
   const containerRef = useRef<HTMLDivElement>(null);
   const nested = use(TabsContext) !== null;
 
